@@ -6,6 +6,12 @@ export default function ComparePage() {
   const [left, setLeft] = useState("");
   const [right, setRight] = useState("");
 
+  // リセットボタン用
+  const handleReset = () => {
+    setLeft("");
+    setRight("");
+  };
+
   const leftChars = Array.from(left.replace(/\r?\n/g, ""));
   const rightChars = Array.from(right.replace(/\r?\n/g, ""));
 
@@ -46,7 +52,11 @@ export default function ComparePage() {
           placeholder="右側の文字列を入力"
         />
       </div>
-      <div className="flex gap-8">
+      <button
+        className="mb-4 px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200"
+        onClick={handleReset}
+      >リセット</button>
+       <div className="flex gap-8">
         <div className="w-1/2">
           <h3 className="font-semibold mb-2">左だけにある文字</h3>
           <div className="p-2 border rounded min-h-[40px]">{onlyLeftArr.join(" ")}</div>

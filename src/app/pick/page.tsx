@@ -2,33 +2,6 @@
 import { useState } from "react";
 import Link from "next/link";
 
-function parseRight(right: string, useTwoDigits: boolean): string[] {
-  // 右側のテキストを分割して数字・アルファベットのみ抽出
-  let arr: string[] = [];
-  const lines = right.split(/\r?\n/).map(l => l.replace(/\s/g, ""));
-  for (const line of lines) {
-    let i = 0;
-    while (i < line.length) {
-      const c = line[i];
-      if (/[A-Za-z]/.test(c)) {
-        arr.push(c);
-        i++;
-      } else if (/[0-9]/.test(c)) {
-        if (useTwoDigits && i + 1 < line.length && /[0-9]/.test(line[i + 1])) {
-          arr.push(line.slice(i, i + 2));
-          i += 2;
-        } else {
-          arr.push(c);
-          i++;
-        }
-      } else {
-        i++;
-      }
-    }
-  }
-  return arr;
-}
-
 export default function PickPage() {
 
   // useState宣言の直後にカスタムタイトルの紐づけ表生成ロジックを配置
@@ -158,6 +131,10 @@ export default function PickPage() {
           2桁を使う
         </label>
       </div>
+        <button
+          className="px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded ml-2"
+          onClick={() => { setLeft(""); setRight(""); setTitle(""); }}
+        >リセット</button>
       <div className="mb-2 font-semibold">{"出力"}</div>
       <div className="overflow-x-auto mb-6">
         <table className="border w-full">

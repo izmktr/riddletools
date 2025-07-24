@@ -30,10 +30,10 @@ export default function CountPage() {
         placeholder="複数行入力できます"
       />
       <div className="flex gap-2 mb-4">
-        <button className="px-3 py-1 bg-blue-200 rounded" onClick={() => setSortType("char")}>文字で並び替え</button>
-        <button className="px-3 py-1 bg-blue-200 rounded" onClick={() => setSortType("count")}>文字数で並び替え</button>
-        <button className="px-3 py-1 bg-blue-200 rounded" onClick={() => setFilterType("odd")}>奇数個ある文字だけ表示</button>
-        <button className="px-3 py-1 bg-blue-200 rounded" onClick={() => setFilterType("even")}>偶数個ある文字だけ表示</button>
+        <button className="px-3 py-1 bg-blue-200 rounded" onClick={() => setSortType("char")}>並び替え(文字)</button>
+        <button className="px-3 py-1 bg-blue-200 rounded" onClick={() => setSortType("count")}>並び替え(個数)</button>
+        <button className="px-3 py-1 bg-blue-200 rounded" onClick={() => setFilterType("odd")}>奇数個のみ表示</button>
+        <button className="px-3 py-1 bg-blue-200 rounded" onClick={() => setFilterType("even")}>偶数個のみ表示</button>
         <button className="px-3 py-1 bg-gray-200 rounded" onClick={() => {setSortType(null);setFilterType(null);setText("");}}>リセット</button>
       </div>
       <div>

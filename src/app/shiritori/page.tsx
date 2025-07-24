@@ -37,6 +37,11 @@ export default function ShiritoriPage() {
   const words = input.split(/\r?\n/).map(w => w.trim()).filter(Boolean);
   const chains = words.length > 0 ? findAllShiritoriChains(words) : [];
 
+  // リセットボタン用
+  const handleReset = () => {
+    setInput("");
+  };
+
   return (
     <main className="max-w-xl mx-auto p-6">
       <Link href="/" className="inline-block mb-4 px-4 py-2 bg-gray-100 rounded hover:bg-gray-200">トップに戻る</Link>
@@ -47,6 +52,10 @@ export default function ShiritoriPage() {
         onChange={e => setInput(e.target.value)}
         placeholder="単語を改行で区切って入力してください"
       />
+      <button
+        className="mb-4 px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200"
+        onClick={handleReset}
+      >リセット</button>
       <div>
         <h3 className="font-semibold mb-2">すべての単語を使ったしりとり組み合わせ</h3>
         <div className="p-2 border rounded min-h-[40px] space-y-2">
