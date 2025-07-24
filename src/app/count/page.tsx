@@ -41,7 +41,7 @@ export default function CountPage() {
           <thead>
             <tr className="bg-gray-100">
               <th className="border px-2">文字</th>
-              <th className="border px-2">数</th>
+              <th className="border px-2">個数</th>
             </tr>
           </thead>
           <tbody>
