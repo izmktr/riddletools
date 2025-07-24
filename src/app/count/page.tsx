@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 
 export default function CountPage() {
   const [text, setText] = useState("");
@@ -20,7 +21,7 @@ export default function CountPage() {
 
   return (
     <main className="max-w-xl mx-auto p-6">
-      <a href="/" className="inline-block mb-4 px-4 py-2 bg-gray-100 rounded hover:bg-gray-200">トップに戻る</a>
+      <Link href="/" className="inline-block mb-4 px-4 py-2 bg-gray-100 rounded hover:bg-gray-200">トップに戻る</Link>
       <h2 className="text-2xl font-bold mb-4">文字数カウントツール</h2>
       <textarea
         className="w-full h-32 p-2 border rounded mb-4"
