@@ -16,8 +16,8 @@ export default function CountPage() {
   let result = Object.entries(charCount);
   if (sortType === "char") result = result.sort((a, b) => a[0].localeCompare(b[0]));
   if (sortType === "count") result = result.sort((a, b) => b[1] - a[1]);
-  if (filterType === "odd") result = result.filter(([_, count]) => count % 2 === 1);
-  if (filterType === "even") result = result.filter(([_, count]) => count % 2 === 0);
+  if (filterType === "odd") result = result.filter(([, count]) => count % 2 === 1);
+  if (filterType === "even") result = result.filter(([, count]) => count % 2 === 0);
 
   return (
     <main className="max-w-xl mx-auto p-6">

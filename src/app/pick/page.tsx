@@ -5,7 +5,7 @@ import Link from "next/link";
 export default function PickPage() {
 
   // useState宣言の直後にカスタムタイトルの紐づけ表生成ロジックを配置
-  let customKeys: string[] = [];
+  const customKeys: string[] = [];
 
   const [left, setLeft] = useState("");
   const [right, setRight] = useState("");
@@ -39,8 +39,8 @@ export default function PickPage() {
   const rightLines = right.split(/\r?\n/).map(l => l.replace(/\s/g, ""));
 
   // 右側の各行ごとに数字・文字を抽出
-  let keys: string[] = [];
-  let values: string[] = [];
+  const keys: string[] = [];
+  const values: string[] = [];
   rightLines.forEach((rLine, lineIdx) => {
     const rArr: string[] = [];
     let i = 0;
