@@ -16,6 +16,11 @@ export default function Home() {
           </Link>
         </li>
         <li>
+          <Link href="/pick" className="block bg-purple-100 hover:bg-purple-200 text-purple-900 font-semibold rounded px-6 py-4 shadow">
+            文字拾いツール
+          </Link>
+        </li>
+        <li>
           <Link href="/shiritori" className="block bg-yellow-100 hover:bg-yellow-200 text-yellow-900 font-semibold rounded px-6 py-4 shadow">
             しりとりソルバー
           </Link>
