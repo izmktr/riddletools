@@ -1,7 +1,6 @@
 "use client";
 import { useState, useRef } from "react";
 import Link from "next/link";
-import { MissingSlotContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 
 type CellState = "white" | "yellow";
 
@@ -342,9 +341,6 @@ export default function SkeletonPage() {
   // 各スロットに確定した文字を探して入れていく
   const solveConstraints = (wordList: string[], slots: Slot[]): { grid: string[][], usedWords: Set<string> } | null => {
     const grid: string[][] = Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill(""));
-    const usedWords = new Set<string>();
-    let bestResult: { grid: string[][], usedWords: Set<string> } | null = null;
-    let maxPlaced = 0;
 
     // 交差点を事前計算
     const intersections = findIntersections(slots);
@@ -364,112 +360,42 @@ export default function SkeletonPage() {
       intersectionLetter(intersection, lengthMap);
     }
 
-    // スロットのうち、候補が1個しかないものをuseListから消していく
-    slots.forEach(slot => {
+    // スロットのうち、候補が1個しかないものをuseListに追加する
+    // 確定できる単語を順次配置していく（無限ループ）
+    while (true) {
+      const trashWords : string[] = [];
+      
+      // 候補が1個しかないスロットを確定
+      slots.forEach(slot => {
       if (slot.confirmedWord == null && slot.candidates && slot.candidates.length === 1) {
         slot.confirmedWord = slot.candidates[0];
         const word = slot.candidates[0];
-        if (isValidPartialPlacement(slot, word, grid)) {
-          placeWord(slot, word, grid);
-          usedWords.add(word);
-        }
+        trashWords.push(word);
       }
+      });
 
-
-    const sortedSlots = slots
-      .map((slot, index) => ({ slot, index, constraints: countConstraints(slot, intersections) }))
-      .sort((a, b) => b.constraints - a.constraints);
-
-     for (const { slot } of sortedSlots) {
-
-    // バックトラッキング（最良解も記録）
-    const backtrack = (slotIndex: number): boolean => {
-      // 現在の配置数が最良を上回った場合は記録
-      if (usedWords.size > maxPlaced) {
-        maxPlaced = usedWords.size;
-        bestResult = {
-          grid: grid.map(row => [...row]),
-          usedWords: new Set(usedWords)
-        };
-      }
-
-      if (slotIndex >= slots.length) {
-        return true; // 全スロット埋まった（完全解）
-      }
-
-      const slot = slots[slotIndex];
-      const length = slot.positions.length;
-      const candidates = wordList.filter(w => w.length === length && !usedWords.has(w));
-
-      for (const word of candidates) {
-        // 制約チェック：交差部分の文字が一致するか
-        if (isValidPlacement(slot, word, grid, intersections, slotIndex)) {
-          // 配置を試す
-          placeWord(slot, word, grid);
-          usedWords.add(word);
-
-          // 再帰的に次のスロットを試す
-          if (backtrack(slotIndex + 1)) {
-            return true; // 完全解が見つかった
-          }
-
-          // バックトラック：配置を取り消す
-          removeWord(slot, grid);
-          usedWords.delete(word);
-        }
-      }
-
-      // このスロットをスキップして次へ
-      if (backtrack(slotIndex + 1)) {
-        return true;
-      }
-
-      return false;
-    };
-
-    // 制約の多いスロットから処理（ヒューリスティック）
-    const sortedSlots = slots
-      .map((slot, index) => ({ slot, index, constraints: countConstraints(slot, intersections) }))
-      .sort((a, b) => b.constraints - a.constraints);
-
-    const reorderedSlots = sortedSlots.map(item => item.slot);
-    
-    if (backtrack(0)) {
-      return { grid, usedWords }; // 完全解
-    }
-
-    // 完全解が見つからない場合は最良の部分解を返す
-    return bestResult;
-  };
-
-  // 有効な配置かチェック
-  const isValidPlacement = (
-    slot: Slot,
-    word: string,
-    grid: string[][],
-    intersections: Intersection[],
-    currentSlotIndex: number
-  ): boolean => {
-    for (let i = 0; i < slot.positions.length; i++) {
-      const pos = slot.positions[i];
-      const key = `${pos.row}-${pos.col}`;
-      const intersection = intersections.get(key);
-
-      if (intersection) {
-        const [slot1Index, slot2Index] = intersection.slots;
-        const [pos1, pos2] = intersection.position;
-
-        // 現在のスロットが交差に関わる場合
-        if (slot1Index === currentSlotIndex || slot2Index === currentSlotIndex) {
-          const existingChar = grid[pos.row][pos.col];
-          if (existingChar && existingChar !== word[i]) {
-            return false; // 文字が一致しない
+      for(const word of trashWords) {
+        for (const slot of slots) {
+          if (slot.confirmedWord === null && slot.candidates) {
+            slot.candidates = slot.candidates.filter(candidate => candidate !== word);
           }
         }
       }
+      if (trashWords.length === 0) {
+        break; // これ以上確定できる単語がない
+      }
     }
 
-    return true;
+  // 確定した単語をグリッドに配置
+    const usedWords = new Set<string>();
+    for (const slot of slots) {
+      if (slot.confirmedWord) {
+        placeWord(slot, slot.confirmedWord, grid);
+        usedWords.add(slot.confirmedWord);
+      }
+    }
+
+    return { grid, usedWords };
   };
 
   // 単語を配置
@@ -480,19 +406,20 @@ export default function SkeletonPage() {
     }
   };
 
-  // 単語を削除
-  const removeWord = (slot: Slot, grid: string[][]) => {
-    for (const pos of slot.positions) {
-      grid[pos.row][pos.col] = "";
-    }
-  };
-
   // 制約数をカウント（ヒューリスティック用）
-  const countConstraints = (slot: Slot, intersections: Map<string, any>): number => {
+  const countConstraints = (slot: Slot, intersections: Intersection[]): number => {
     let count = 0;
-    for (const pos of slot.positions) {
-      const key = `${pos.row}-${pos.col}`;
-      if (intersections.has(key)) {
+    for (const intersection of intersections) {
+      // このスロットが交差点に関わっているかチェック
+      const hasIntersection = slot.positions.some(pos => 
+        (intersection.horizontalSlots === slot && 
+         pos.row === intersection.verticalSlots.positions[intersection.verticalLetterPosition].row &&
+         pos.col === intersection.verticalSlots.positions[intersection.verticalLetterPosition].col) ||
+        (intersection.verticalSlots === slot && 
+         pos.row === intersection.horizontalSlots.positions[intersection.horizontalLetterPosition].row &&
+         pos.col === intersection.horizontalSlots.positions[intersection.horizontalLetterPosition].col)
+      );
+      if (hasIntersection) {
         count++;
       }
     }

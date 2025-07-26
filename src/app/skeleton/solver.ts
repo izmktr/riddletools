@@ -182,7 +182,7 @@ export const removeWord = (slot: Word, grid: string[][]) => {
 };
 
 // 制約数をカウント（ヒューリスティック用）
-export const countConstraints = (slot: Word, intersections: Map<string, any>): number => {
+export const countConstraints = (slot: Word, intersections: Map<string, { slots: number[], position: number[] }>): number => {
   let count = 0;
   for (const pos of slot.positions) {
     const key = `${pos.row}-${pos.col}`;
@@ -288,8 +288,6 @@ export const solveConstraints = (wordList: string[], slots: Word[], boardWidth: 
     .map((slot, index) => ({ slot, index, constraints: countConstraints(slot, intersections) }))
     .sort((a, b) => b.constraints - a.constraints);
 
-  const reorderedSlots = sortedSlots.map(item => item.slot);
-  
   if (backtrack(0)) {
     return { grid, usedWords }; // 完全解
   }
