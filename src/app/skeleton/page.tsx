@@ -1,0 +1,602 @@
+"use client";
+import { useState, useRef } from "react";
+import Link from "next/link";
+import { MissingSlotContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
+
+type CellState = "white" | "yellow";
+
+interface Position {
+  row: number;
+  col: number;
+}
+
+interface Slot {
+  text: string;
+  positions: Position[];
+  direction: "horizontal" | "vertical";
+  length: number;
+  candidates: string[] | null;
+  confirmedWord: string | null;
+}
+
+interface Intersection{
+  verticalSlots: Slot;
+  verticalLetterPosition: number;
+  horizontalSlots: Slot;
+  horizontalLetterPosition: number;
+}
+
+const BOARD_WIDTH = 24;
+const BOARD_HEIGHT = 16;
+
+export default function SkeletonPage() {
+  const [showManual, setShowManual] = useState(false);
+  const [words, setWords] = useState("");
+  const [board, setBoard] = useState<CellState[][]>(
+    Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill("white"))
+  );
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragMode, setDragMode] = useState<CellState>("white");
+  const [unusedWords, setUnusedWords] = useState<string[]>([]);
+  const [solvedGrid, setSolvedGrid] = useState<string[][] | null>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
+
+  // サンプル挿入用
+  const handleSample = () => {
+    setWords("りんご\nみかん\nばなな\nいちご\nぶどう");
+    // サンプル用のボード設定（十字の形）
+    const newBoard = Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill("white"));
+    // 横線
+    for (let col = 8; col <= 16; col++) {
+      newBoard[8][col] = "yellow";
+    }
+    // 縦線
+    for (let row = 6; row <= 10; row++) {
+      newBoard[row][12] = "yellow";
+    }
+    setBoard(newBoard);
+    setShowManual(false);
+  };
+
+  // リセット
+  const handleReset = () => {
+    setWords("");
+    setBoard(Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill("white")));
+    setUnusedWords([]);
+    setSolvedGrid(null);
+  };
+
+  // マスのクリック
+  const handleCellClick = (row: number, col: number) => {
+    const newBoard = [...board];
+    newBoard[row][col] = newBoard[row][col] === "white" ? "yellow" : "white";
+    setBoard(newBoard);
+  };
+
+  // ドラッグ開始
+  const handleMouseDown = (row: number, col: number) => {
+    setIsDragging(true);
+    const currentState = board[row][col];
+    setDragMode(currentState === "white" ? "yellow" : "white");
+    handleCellClick(row, col);
+  };
+
+  // ドラッグ中
+  const handleMouseEnter = (row: number, col: number) => {
+    if (isDragging) {
+      const newBoard = [...board];
+      newBoard[row][col] = dragMode;
+      setBoard(newBoard);
+    }
+  };
+
+  // ドラッグ終了
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  // 連続するマスを取得
+  const getConsecutiveCells = (): Slot[] => {
+    const words: Slot[] = [];
+    
+    // 横方向をチェック
+    for (let row = 0; row < BOARD_HEIGHT; row++) {
+      let start = -1;
+      for (let col = 0; col <= BOARD_WIDTH; col++) {
+        if (col < BOARD_WIDTH && board[row][col] === "yellow") {
+          if (start === -1) start = col;
+        } else {
+          if (start !== -1 && col - start >= 2) {
+            const positions: Position[] = [];
+            for (let c = start; c < col; c++) {
+              positions.push({ row, col: c });
+            }
+            words.push({
+              text: "",
+              positions,
+              direction: "horizontal",
+              length: col - start,
+              candidates: null,
+              confirmedWord: null
+            });
+          }
+          start = -1;
+        }
+      }
+    }
+
+    // 縦方向をチェック
+    for (let col = 0; col < BOARD_WIDTH; col++) {
+      let start = -1;
+      for (let row = 0; row <= BOARD_HEIGHT; row++) {
+        if (row < BOARD_HEIGHT && board[row][col] === "yellow") {
+          if (start === -1) start = row;
+        } else {
+          if (start !== -1 && row - start >= 2) {
+            const positions: Position[] = [];
+            for (let r = start; r < row; r++) {
+              positions.push({ row: r, col });
+            }
+            words.push({
+              text: "",
+              positions,
+              direction: "vertical",
+              length: row - start,
+              candidates: null,
+              confirmedWord: null
+            });
+          }
+          start = -1;
+        }
+      }
+    }
+
+    return words;
+  };
+
+  // 交差点を見つける
+  const findIntersections = (slots: Slot[]): Intersection[] => {
+    const intersections: Intersection[] = [];
+
+    for (let i = 0; i < slots.length; i++) {
+      for (let j = i + 1; j < slots.length; j++) {
+        const slot1 = slots[i];
+        const slot2 = slots[j];
+        const intersection = createIntersection(slot1, slot2);
+        if (intersection) {
+          intersections.push(intersection);
+        }
+      }
+    }
+
+    return intersections;
+  };
+
+
+  // 高度な解析実行
+  const handleAnalyze = () => {
+    const wordList = words.split(/\r?\n/).map(w => w.trim()).filter(Boolean);
+    const slots = getConsecutiveCells();
+    
+    // バックトラッキングによる制約解法
+    const result = solveConstraints(wordList, slots);
+    
+    if (result) {
+      // 使われなかった単語
+      const unused = wordList.filter(w => !result.usedWords.has(w));
+      setUnusedWords(unused);
+      
+      // 解析結果をボードに表示
+      setSolvedGrid(result.grid);
+    } else {
+      // 完全解が見つからない場合でも部分解を試す
+      const partialResult = solvePartial(wordList, slots);
+      if (partialResult) {
+        const unused = wordList.filter(w => !partialResult.usedWords.has(w));
+        setUnusedWords([...unused, "（部分解析結果）"]);
+        setSolvedGrid(partialResult.grid);
+      } else {
+        setUnusedWords(["解が見つかりませんでした"]);
+        setSolvedGrid(null);
+      }
+    }
+  };
+
+  const createIntersection = (slot1: Slot, slot2: Slot): Intersection | null => {
+    // 同じ方向のスロットは交差しない
+    if (slot1.direction === slot2.direction) {
+      return null;
+    }
+
+    // slot1を横、slot2を縦として処理を統一
+    let horizontalSlot = slot1;
+    let verticalSlot = slot2;
+    
+    // slot1が縦の場合は交換
+    if (slot1.direction === "vertical") {
+      horizontalSlot = slot2;
+      verticalSlot = slot1;
+    }
+
+    const horizontalRow = horizontalSlot.positions[0].row;
+    const verticalCol = verticalSlot.positions[0].col;
+    
+    // 横線の範囲
+    const horizontalStart = horizontalSlot.positions[0].col;
+    const horizontalEnd = horizontalSlot.positions[horizontalSlot.positions.length - 1].col;
+    
+    // 縦線の範囲
+    const verticalStart = verticalSlot.positions[0].row;
+    const verticalEnd = verticalSlot.positions[verticalSlot.positions.length - 1].row;
+    
+    // 交差するかチェック
+    if (verticalCol >= horizontalStart && verticalCol <= horizontalEnd &&
+        horizontalRow >= verticalStart && horizontalRow <= verticalEnd) {
+      
+      return {
+        verticalSlots: verticalSlot,
+        verticalLetterPosition: horizontalRow - verticalStart,
+        horizontalSlots: horizontalSlot,
+        horizontalLetterPosition: verticalCol - horizontalStart
+      };
+    }
+
+    return null;
+  };
+
+  // 部分的な解析（制約を緩和）
+  const solvePartial = (wordList: string[], slots: Slot[]): { grid: string[][], usedWords: Set<string> } | null => {
+    const grid: string[][] = Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill(""));
+    const usedWords = new Set<string>();
+
+    // 交差点を事前計算
+    const intersections = findIntersections(slots);
+
+    // 制約の少ないスロットから順に試す（貪欲法）
+    const sortedSlots = slots
+      .map((slot, index) => ({ slot, index, constraints: countConstraints(slot, intersections) }))
+      .sort((a, b) => a.constraints - b.constraints);
+
+    for (const { slot } of sortedSlots) {
+      const length = slot.positions.length;
+      const candidates = wordList.filter(w => w.length === length && !usedWords.has(w));
+      
+      // 制約を満たす単語を探す
+      for (const word of candidates) {
+        if (isValidPartialPlacement(slot, word, grid)) {
+          placeWord(slot, word, grid);
+          usedWords.add(word);
+          break; // この長さの最初の有効な単語を使用
+        }
+      }
+    }
+
+    // 何かしら配置できた場合は結果を返す
+    if (usedWords.size > 0) {
+      return { grid, usedWords };
+    }
+
+    return null;
+  };
+
+  // 部分配置での制約チェック（より緩い）
+  const isValidPartialPlacement = (slot: Slot, word: string, grid: string[][]): boolean => {
+    for (let i = 0; i < slot.positions.length; i++) {
+      const pos = slot.positions[i];
+      const existingChar = grid[pos.row][pos.col];
+      
+      // 既に文字が配置されている場合は一致をチェック
+      if (existingChar && existingChar !== word[i]) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  // 交点に入る文字を確定し、そこから、Slotに入りうる候補を探していく
+  const intersectionLetter = (intersection: Intersection, lengthMap: Map<number, string[]>) => {
+    //　縦のスロットに入りうる文字の一覧
+    const verticalCandidates = lengthMap.get(intersection.verticalSlots.length);
+    if (!verticalCandidates) return;
+    const verticalLetters = verticalCandidates.filter(c => c[intersection.verticalLetterPosition]);
+    // 横のスロットに入りうる文字の一覧
+    const horizontalCandidates = lengthMap.get(intersection.horizontalSlots.length);
+    if (!horizontalCandidates) return;
+    const horizontalLetters = horizontalCandidates.filter(c => c[intersection.horizontalLetterPosition]);
+
+    // 交差点の文字を抽出
+    const letters: string[] = [];
+    for (const vLetter of verticalLetters) {
+      for (const hLetter of horizontalLetters) {
+        if (vLetter[intersection.verticalLetterPosition] === hLetter[intersection.horizontalLetterPosition]) {
+          letters.push(vLetter[intersection.verticalLetterPosition]);
+        }
+      }
+    }
+
+    // 交点の文字から、候補の単語を抽出する
+    const filteredVerticalCandidates = verticalCandidates.filter(word => 
+      letters.includes(word[intersection.verticalLetterPosition])
+    );
+    const filteredHorizontalCandidates = horizontalCandidates.filter(word => 
+      letters.includes(word[intersection.horizontalLetterPosition])
+    );
+
+    // 候補を更新
+    if (intersection.verticalSlots.candidates){
+      intersection.verticalSlots.candidates = intersection.verticalSlots.candidates.filter(word => 
+        filteredVerticalCandidates.includes(word)
+      );
+    }else{
+      intersection.verticalSlots.candidates = filteredVerticalCandidates;
+    }
+    if (intersection.horizontalSlots.candidates){
+      intersection.horizontalSlots.candidates = intersection.horizontalSlots.candidates.filter(word => 
+        filteredHorizontalCandidates.includes(word)
+      );
+    }else{ 
+      intersection.horizontalSlots.candidates = filteredHorizontalCandidates;
+    }
+  }
+
+  // 各スロットに確定した文字を探して入れていく
+  const solveConstraints = (wordList: string[], slots: Slot[]): { grid: string[][], usedWords: Set<string> } | null => {
+    const grid: string[][] = Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill(""));
+    const usedWords = new Set<string>();
+    let bestResult: { grid: string[][], usedWords: Set<string> } | null = null;
+    let maxPlaced = 0;
+
+    // 交差点を事前計算
+    const intersections = findIntersections(slots);
+
+    // 文字数別に単語を分ける
+    const lengthMap = new Map<number, string[]>();
+    for (const word of wordList) {
+      const length = word.length;
+      if (!lengthMap.has(length)) {
+        lengthMap.set(length, []);
+      }
+      lengthMap.get(length)!.push(word);
+    }
+
+    // すべての交点に対して、交差する文字から候補を絞る
+    for (const intersection of intersections) {
+      intersectionLetter(intersection, lengthMap);
+    }
+
+    // スロットのうち、候補が1個しかないものをuseListから消していく
+    slots.forEach(slot => {
+      if (slot.confirmedWord == null && slot.candidates && slot.candidates.length === 1) {
+        slot.confirmedWord = slot.candidates[0];
+        const word = slot.candidates[0];
+        if (isValidPartialPlacement(slot, word, grid)) {
+          placeWord(slot, word, grid);
+          usedWords.add(word);
+        }
+      }
+
+
+    const sortedSlots = slots
+      .map((slot, index) => ({ slot, index, constraints: countConstraints(slot, intersections) }))
+      .sort((a, b) => b.constraints - a.constraints);
+
+     for (const { slot } of sortedSlots) {
+
+    // バックトラッキング（最良解も記録）
+    const backtrack = (slotIndex: number): boolean => {
+      // 現在の配置数が最良を上回った場合は記録
+      if (usedWords.size > maxPlaced) {
+        maxPlaced = usedWords.size;
+        bestResult = {
+          grid: grid.map(row => [...row]),
+          usedWords: new Set(usedWords)
+        };
+      }
+
+      if (slotIndex >= slots.length) {
+        return true; // 全スロット埋まった（完全解）
+      }
+
+      const slot = slots[slotIndex];
+      const length = slot.positions.length;
+      const candidates = wordList.filter(w => w.length === length && !usedWords.has(w));
+
+      for (const word of candidates) {
+        // 制約チェック：交差部分の文字が一致するか
+        if (isValidPlacement(slot, word, grid, intersections, slotIndex)) {
+          // 配置を試す
+          placeWord(slot, word, grid);
+          usedWords.add(word);
+
+          // 再帰的に次のスロットを試す
+          if (backtrack(slotIndex + 1)) {
+            return true; // 完全解が見つかった
+          }
+
+          // バックトラック：配置を取り消す
+          removeWord(slot, grid);
+          usedWords.delete(word);
+        }
+      }
+
+      // このスロットをスキップして次へ
+      if (backtrack(slotIndex + 1)) {
+        return true;
+      }
+
+      return false;
+    };
+
+    // 制約の多いスロットから処理（ヒューリスティック）
+    const sortedSlots = slots
+      .map((slot, index) => ({ slot, index, constraints: countConstraints(slot, intersections) }))
+      .sort((a, b) => b.constraints - a.constraints);
+
+    const reorderedSlots = sortedSlots.map(item => item.slot);
+    
+    if (backtrack(0)) {
+      return { grid, usedWords }; // 完全解
+    }
+
+    // 完全解が見つからない場合は最良の部分解を返す
+    return bestResult;
+  };
+
+  // 有効な配置かチェック
+  const isValidPlacement = (
+    slot: Slot,
+    word: string,
+    grid: string[][],
+    intersections: Intersection[],
+    currentSlotIndex: number
+  ): boolean => {
+    for (let i = 0; i < slot.positions.length; i++) {
+      const pos = slot.positions[i];
+      const key = `${pos.row}-${pos.col}`;
+      const intersection = intersections.get(key);
+
+      if (intersection) {
+        const [slot1Index, slot2Index] = intersection.slots;
+        const [pos1, pos2] = intersection.position;
+
+        // 現在のスロットが交差に関わる場合
+        if (slot1Index === currentSlotIndex || slot2Index === currentSlotIndex) {
+          const existingChar = grid[pos.row][pos.col];
+          if (existingChar && existingChar !== word[i]) {
+            return false; // 文字が一致しない
+          }
+        }
+      }
+    }
+
+    return true;
+  };
+
+  // 単語を配置
+  const placeWord = (slot: Slot, word: string, grid: string[][]) => {
+    for (let i = 0; i < word.length; i++) {
+      const pos = slot.positions[i];
+      grid[pos.row][pos.col] = word[i];
+    }
+  };
+
+  // 単語を削除
+  const removeWord = (slot: Slot, grid: string[][]) => {
+    for (const pos of slot.positions) {
+      grid[pos.row][pos.col] = "";
+    }
+  };
+
+  // 制約数をカウント（ヒューリスティック用）
+  const countConstraints = (slot: Slot, intersections: Map<string, any>): number => {
+    let count = 0;
+    for (const pos of slot.positions) {
+      const key = `${pos.row}-${pos.col}`;
+      if (intersections.has(key)) {
+        count++;
+      }
+    }
+    return count;
+  };
+
+  return (
+    <main className="max-w-4xl mx-auto p-6">
+      <div className="flex items-center mb-4 gap-2">
+        <button
+          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+          onClick={() => setShowManual(true)}
+        >使い方</button>
+        <Link href="/" className="inline-block px-4 py-2 bg-gray-100 rounded hover:bg-gray-200">トップに戻る</Link>
+      </div>
+      
+      {showManual && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative">
+            <button
+              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
+              onClick={() => setShowManual(false)}
+            >閉じる</button>
+            <h3 className="text-xl font-bold mb-2">スケルトンソルバーの使い方</h3>
+            <ul className="list-disc pl-5 space-y-2 text-sm mb-4">
+              <li>単語入力領域に候補単語を改行区切りで入力してください。</li>
+              <li>ボード領域でマスをクリックして黄色にし、単語を配置する場所を指定してください。</li>
+              <li>ドラッグで複数のマスを一度に切り替えできます。</li>
+              <li>解析ボタンで、連続する黄色マスに単語を配置します。</li>
+              <li>使われなかった単語は下部に表示されます。</li>
+            </ul>
+            <button
+              className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 mr-2"
+              onClick={handleSample}
+            >サンプル</button>
+          </div>
+        </div>
+      )}
+
+      <h2 className="text-2xl font-bold mb-4">スケルトンソルバー</h2>
+      
+      <div className="mb-4">
+        <h3 className="font-semibold mb-2">単語入力</h3>
+        <textarea
+          className="w-full h-32 p-2 border rounded"
+          value={words}
+          onChange={e => setWords(e.target.value)}
+          placeholder="単語を改行で区切って入力してください"
+        />
+      </div>
+
+      <div className="mb-4 flex gap-2">
+        <button
+          className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200"
+          onClick={handleReset}
+        >リセット</button>
+        <button
+          className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+          onClick={handleAnalyze}
+        >解析</button>
+      </div>
+
+      <div className="mb-4">
+        <h3 className="font-semibold mb-2">ボード（クリック・ドラッグで黄色/白を切り替え）</h3>
+        <div 
+          ref={boardRef}
+          className="inline-block border-2 border-gray-400 select-none"
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+        >
+          {board.map((row, rowIndex) => (
+            <div key={rowIndex} className="flex">
+              {row.map((cell, colIndex) => (
+                <div
+                  key={`${rowIndex}-${colIndex}`}
+                  className={`w-6 h-6 border border-gray-300 cursor-pointer flex items-center justify-center text-xs font-bold ${
+                    cell === "yellow" ? "bg-yellow-200" : "bg-white"
+                  }`}
+                  onMouseDown={() => handleMouseDown(rowIndex, colIndex)}
+                  onMouseEnter={() => handleMouseEnter(rowIndex, colIndex)}
+                >
+                  {solvedGrid && solvedGrid[rowIndex][colIndex] ? solvedGrid[rowIndex][colIndex] : ""}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {unusedWords.length > 0 && (
+        <div>
+          <h3 className="font-semibold mb-2">
+            {unusedWords.includes("（部分解析結果）") ? "部分解析結果 - 使われなかった単語" : "使われなかった単語"}
+          </h3>
+          <div className="p-2 border rounded bg-gray-50">
+            {unusedWords.join("、")}
+          </div>
+          {unusedWords.includes("（部分解析結果）") && (
+            <div className="mt-2 text-sm text-orange-600">
+              ※ 完全解が見つからなかったため、制約を満たす範囲で部分的に配置しました
+            </div>
+          )}
+        </div>
+      )}
+    </main>
+  );
+}

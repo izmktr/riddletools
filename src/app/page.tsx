@@ -25,6 +25,11 @@ export default function Home() {
             しりとりソルバー
           </Link>
         </li>
+        <li>
+          <Link href="/skeleton" className="block bg-orange-100 hover:bg-orange-200 text-orange-900 font-semibold rounded px-6 py-4 shadow">
+            スケルトンソルバー
+          </Link>
+        </li>
       </ul>
     </main>
   );
