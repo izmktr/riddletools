@@ -42,18 +42,27 @@ export default function SkeletonPage() {
 
   // サンプル挿入用
   const handleSample = () => {
-    setWords("りんご\nみかん\nばなな\nいちご\nぶどう");
+    setWords("かんでんち\nでんわせん\nわしんとん\nかしわ\nわだい");
     // サンプル用のボード設定（十字の形）
     const newBoard = Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill("white"));
-    // 横線
-    for (let col = 8; col <= 16; col++) {
-      newBoard[8][col] = "yellow";
-    }
-    // 縦線
-    for (let row = 6; row <= 10; row++) {
-      newBoard[row][12] = "yellow";
+    const sampleBoard = [
+      [1, 1, 1, 1, 1],
+      [0, 0, 1, 0, 0],
+      [1, 0, 1, 1, 1],
+      [1, 0, 1, 0, 0],
+      [1, 1, 1, 1, 1],
+    ];
+    for (let col = 0; col < 5; col++) {
+      for (let row = 0; row < 5; row++) {
+        if (sampleBoard[row][col] === 1) {
+          newBoard[row + 5][col + 9] = "yellow";
+        }
+      }
     }
     setBoard(newBoard);
+    // 解析結果もクリア
+    setUnusedWords([]);
+    setSolvedGrid(null);
     setShowManual(false);
   };
 
