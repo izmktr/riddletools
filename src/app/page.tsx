@@ -30,6 +30,11 @@ export default function Home() {
             スケルトンソルバー
           </Link>
         </li>
+        <li>
+          <Link href="/maze" className="block bg-red-100 hover:bg-red-200 text-red-900 font-semibold rounded px-6 py-4 shadow">
+            迷路ソルバー
+          </Link>
+        </li>
       </ul>
     </main>
   );
