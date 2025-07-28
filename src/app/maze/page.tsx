@@ -18,6 +18,11 @@ interface Edges {
   left: EdgeType;
 }
 
+interface Coordinate {
+  x: number;
+  y: number;
+}
+
 export default function MazePage() {
   const [width, setWidth] = useState(5);
   const [height, setHeight] = useState(5);
@@ -25,7 +30,10 @@ export default function MazePage() {
   const [tempHeight, setTempHeight] = useState(5);
   const [mode, setMode] = useState<ModeType>('wall');
   const [rule, setRule] = useState<RuleType>('passthrough');
-  
+  const [solutionPath, setSolutionPath] = useState<Coordinate[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [hasAnalyzed, setHasAnalyzed] = useState(false);
+
   // 盤面の状態を管理
   const [cells, setCells] = useState<Cell[][]>(() => {
     const initialCells = Array(5).fill(null).map(() => 
@@ -48,6 +56,84 @@ export default function MazePage() {
       }))
     )
   );
+
+  // 迷路解析関数
+  const solveMaze = useCallback((): Coordinate[] => {
+    // スタートとゴールの位置を見つける
+    let start: Coordinate | null = null;
+    let goal: Coordinate | null = null;
+    
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (cells[y][x].type === 'start') {
+          start = { x, y };
+        } else if (cells[y][x].type === 'goal') {
+          goal = { x, y };
+        }
+      }
+    }
+    
+    if (!start || !goal) {
+      return []; // スタートまたはゴールが見つからない場合
+    }
+    
+    // 簡単なBFS（幅優先探索）で経路探索
+    const queue: { coord: Coordinate; path: Coordinate[] }[] = [
+      { coord: start, path: [start] }
+    ];
+    const visited = new Set<string>();
+    visited.add(`${start.x},${start.y}`);
+    
+    const directions = [
+      { dx: 0, dy: -1 }, // 上
+      { dx: 1, dy: 0 },  // 右
+      { dx: 0, dy: 1 },  // 下
+      { dx: -1, dy: 0 }  // 左
+    ];
+    
+    while (queue.length > 0) {
+      const { coord, path } = queue.shift()!;
+      
+      if (coord.x === goal.x && coord.y === goal.y) {
+        return path; // ゴールに到達
+      }
+      
+      for (const { dx, dy } of directions) {
+        const newX = coord.x + dx;
+        const newY = coord.y + dy;
+        const key = `${newX},${newY}`;
+        
+        // 範囲外チェック
+        if (newX < 0 || newX >= width || newY < 0 || newY >= height) {
+          continue;
+        }
+        
+        // 既に訪問済みまたはブロックされているセル
+        if (visited.has(key) || cells[newY][newX].type === 'blocked') {
+          continue;
+        }
+        
+        // 壁チェック
+        let canMove = true;
+        const currentEdges = edges[coord.y][coord.x];
+        
+        if (dy === -1 && currentEdges.top === 'wall') canMove = false; // 上
+        if (dx === 1 && currentEdges.right === 'wall') canMove = false; // 右
+        if (dy === 1 && currentEdges.bottom === 'wall') canMove = false; // 下
+        if (dx === -1 && currentEdges.left === 'wall') canMove = false; // 左
+        
+        if (canMove) {
+          visited.add(key);
+          queue.push({
+            coord: { x: newX, y: newY },
+            path: [...path, { x: newX, y: newY }]
+          });
+        }
+      }
+    }
+    
+    return []; // 経路が見つからない場合
+  }, [cells, edges, width, height]);
 
   const resetBoard = useCallback(() => {
     const newCells = Array(height).fill(null).map(() => 
@@ -72,7 +158,24 @@ export default function MazePage() {
     
     setCells(newCells);
     setEdges(newEdges);
+    setSolutionPath([]); // パスもクリア
+    setHasAnalyzed(false);
   }, [width, height]);
+
+  // 解析実行処理
+  const handleAnalyze = useCallback(async () => {
+    setIsAnalyzing(true);
+    setHasAnalyzed(false);
+    try {
+      // 少し遅延を入れて解析中の表示を見せる
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const path = solveMaze();
+      setSolutionPath(path);
+      setHasAnalyzed(true);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, [solveMaze]);
 
   const resizeBoard = useCallback(() => {
     const newWidth = tempWidth;
@@ -225,7 +328,7 @@ export default function MazePage() {
   }, [mode]);
 
   const getCellStyle = (cell: Cell) => {
-    const baseStyle = "w-12 h-12 border border-gray-400 flex items-center justify-center text-lg font-bold";
+    const baseStyle = "w-12 h-12 flex items-center justify-center text-lg font-bold";
     const interactiveStyle = mode !== 'wall' ? "cursor-pointer" : "cursor-default";
     const hoverStyle = mode !== 'wall' ? "hover:bg-gray-100" : "";
     
@@ -263,6 +366,18 @@ export default function MazePage() {
     return `${baseStyle} ${hoverStyle}`;
   };
 
+  const getWallThickness = (edge: EdgeType, isOuter: boolean, direction: 'horizontal' | 'vertical') => {
+    if (isOuter) {
+      return direction === 'horizontal' ? "h-2" : "w-2"; // 外枠は太い
+    }
+    
+    if (edge === 'wall') {
+      return direction === 'horizontal' ? "h-2" : "w-2"; // 壁は太い
+    } else {
+      return direction === 'horizontal' ? "h-0.5" : "w-0.5"; // 通常の辺は細い
+    }
+  };
+
   const renderCell = (cell: Cell, rowIndex: number, colIndex: number) => {
     const cellEdges = edges[rowIndex][colIndex];
     const isOuterTop = rowIndex === 0;
@@ -272,12 +387,16 @@ export default function MazePage() {
     
     // 壁モードかどうかで辺とセルのクリック可能性を制御
     const isWallMode = mode === 'wall';
+    
+    // このセルがパスに含まれているかチェック
+    const isInPath = solutionPath.some(coord => coord.x === colIndex && coord.y === rowIndex);
+    const pathIndex = solutionPath.findIndex(coord => coord.x === colIndex && coord.y === rowIndex);
 
     return (
       <div key={`${rowIndex}-${colIndex}`} className="relative">
         {/* 上の辺 */}
         <div
-          className={`absolute -top-1 left-0 right-0 h-2 ${
+          className={`absolute -top-1 left-0 right-0 ${getWallThickness(cellEdges.top, isOuterTop, 'horizontal')} ${
             isWallMode && !isOuterTop ? 'cursor-pointer' : 'cursor-default'
           } ${getWallStyle(cellEdges.top, isOuterTop)}`}
           onClick={() => isWallMode && !isOuterTop && handleWallClick(rowIndex, colIndex, 'top')}
@@ -286,7 +405,7 @@ export default function MazePage() {
         
         {/* 左の辺 */}
         <div
-          className={`absolute -left-1 top-0 bottom-0 w-2 ${
+          className={`absolute -left-1 top-0 bottom-0 ${getWallThickness(cellEdges.left, isOuterLeft, 'vertical')} ${
             isWallMode && !isOuterLeft ? 'cursor-pointer' : 'cursor-default'
           } ${getWallStyle(cellEdges.left, isOuterLeft)}`}
           onClick={() => isWallMode && !isOuterLeft && handleWallClick(rowIndex, colIndex, 'left')}
@@ -295,7 +414,7 @@ export default function MazePage() {
         
         {/* 右の辺 */}
         <div
-          className={`absolute -right-1 top-0 bottom-0 w-2 ${
+          className={`absolute -right-1 top-0 bottom-0 ${getWallThickness(cellEdges.right, isOuterRight, 'vertical')} ${
             isWallMode && !isOuterRight ? 'cursor-pointer' : 'cursor-default'
           } ${getWallStyle(cellEdges.right, isOuterRight)}`}
           onClick={() => isWallMode && !isOuterRight && handleWallClick(rowIndex, colIndex, 'right')}
@@ -304,12 +423,58 @@ export default function MazePage() {
         
         {/* 下の辺 */}
         <div
-          className={`absolute -bottom-1 left-0 right-0 h-2 ${
+          className={`absolute -bottom-1 left-0 right-0 ${getWallThickness(cellEdges.bottom, isOuterBottom, 'horizontal')} ${
             isWallMode && !isOuterBottom ? 'cursor-pointer' : 'cursor-default'
           } ${getWallStyle(cellEdges.bottom, isOuterBottom)}`}
           onClick={() => isWallMode && !isOuterBottom && handleWallClick(rowIndex, colIndex, 'bottom')}
           style={{ zIndex: 10 }}
         />
+        
+        {/* パスの線を描画 */}
+        {isInPath && pathIndex > 0 && (
+          <div className="absolute inset-0 flex items-center justify-center" style={{ zIndex: 15 }}>
+            {(() => {
+              const prevCoord = solutionPath[pathIndex - 1];
+              const currentCoord = { x: colIndex, y: rowIndex };
+              const dx = currentCoord.x - prevCoord.x;
+              const dy = currentCoord.y - prevCoord.y;
+              
+              if (dx === 1) { // 右から来た
+                return <div className="absolute left-0 top-1/2 w-6 h-1 bg-red-500 -translate-y-1/2" />;
+              } else if (dx === -1) { // 左から来た
+                return <div className="absolute right-0 top-1/2 w-6 h-1 bg-red-500 -translate-y-1/2" />;
+              } else if (dy === 1) { // 上から来た
+                return <div className="absolute top-0 left-1/2 w-1 h-6 bg-red-500 -translate-x-1/2" />;
+              } else if (dy === -1) { // 下から来た
+                return <div className="absolute bottom-0 left-1/2 w-1 h-6 bg-red-500 -translate-x-1/2" />;
+              }
+              return null;
+            })()}
+          </div>
+        )}
+        
+        {/* パスの次の線を描画 */}
+        {isInPath && pathIndex < solutionPath.length - 1 && (
+          <div className="absolute inset-0 flex items-center justify-center" style={{ zIndex: 15 }}>
+            {(() => {
+              const nextCoord = solutionPath[pathIndex + 1];
+              const currentCoord = { x: colIndex, y: rowIndex };
+              const dx = nextCoord.x - currentCoord.x;
+              const dy = nextCoord.y - currentCoord.y;
+              
+              if (dx === 1) { // 右へ行く
+                return <div className="absolute right-0 top-1/2 w-6 h-1 bg-red-500 -translate-y-1/2" />;
+              } else if (dx === -1) { // 左へ行く
+                return <div className="absolute left-0 top-1/2 w-6 h-1 bg-red-500 -translate-y-1/2" />;
+              } else if (dy === 1) { // 下へ行く
+                return <div className="absolute bottom-0 left-1/2 w-1 h-6 bg-red-500 -translate-x-1/2" />;
+              } else if (dy === -1) { // 上へ行く
+                return <div className="absolute top-0 left-1/2 w-1 h-6 bg-red-500 -translate-x-1/2" />;
+              }
+              return null;
+            })()}
+          </div>
+        )}
         
         {/* セル本体 */}
         <div
@@ -386,10 +551,15 @@ export default function MazePage() {
             リセット
           </button>
           <button
-            onClick={() => alert('解析機能は未実装です')}
-            className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+            onClick={handleAnalyze}
+            disabled={isAnalyzing}
+            className={`px-4 py-2 text-white rounded ${
+              isAnalyzing 
+                ? 'bg-gray-400 cursor-not-allowed' 
+                : 'bg-green-500 hover:bg-green-600'
+            }`}
           >
-            解析
+            {isAnalyzing ? '解析中...' : '解析'}
           </button>
         </div>
       </div>
@@ -428,6 +598,38 @@ export default function MazePage() {
           ))}
         </div>
       </div>
+
+      {/* 解析結果 */}
+      {solutionPath.length > 0 && (
+        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded">
+          <h3 className="font-bold text-green-800 mb-2">解析結果</h3>
+          <p className="text-green-700">
+            経路が見つかりました！ 総ステップ数: {solutionPath.length - 1}
+          </p>
+          <div className="mt-2 text-sm text-green-600">
+            経路: {solutionPath.map(coord => `(${coord.x},${coord.y})`).join(' → ')}
+          </div>
+          <div className="mt-2">
+            <button
+              onClick={() => {
+                setSolutionPath([]);
+                setHasAnalyzed(false);
+              }}
+              className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
+            >
+              結果をクリア
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 解析結果（経路なし） */}
+      {hasAnalyzed && solutionPath.length === 0 && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded">
+          <h3 className="font-bold text-red-800 mb-2">解析結果</h3>
+          <p className="text-red-700">経路が見つかりませんでした。スタートからゴールへの道が塞がれている可能性があります。</p>
+        </div>
+      )}
 
       {/* 説明 */}
       <div className="text-sm text-gray-600 max-w-2xl">
