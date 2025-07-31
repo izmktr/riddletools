@@ -14,7 +14,7 @@ interface Slot {
   positions: Position[];
   direction: "horizontal" | "vertical";
   length: number;
-  candidates: string[] | null;
+  candidates: string[];
   confirmedWord: string | null;
 }
 
@@ -124,7 +124,7 @@ export default function SkeletonPage() {
               positions,
               direction: "horizontal",
               length: col - start,
-              candidates: null,
+              candidates: [],
               confirmedWord: null
             });
           }
@@ -150,7 +150,7 @@ export default function SkeletonPage() {
               positions,
               direction: "vertical",
               length: row - start,
-              candidates: null,
+              candidates: [],
               confirmedWord: null
             });
           }
@@ -303,48 +303,50 @@ export default function SkeletonPage() {
 
   // 交点に入る文字を確定し、そこから、Slotに入りうる候補を探していく
   const intersectionLetter = (intersection: Intersection, lengthMap: Map<number, string[]>) => {
-    //　縦のスロットに入りうる文字の一覧
-    const verticalCandidates = lengthMap.get(intersection.verticalSlots.length);
-    if (!verticalCandidates) return;
-    const verticalLetters = verticalCandidates.filter(c => c[intersection.verticalLetterPosition]);
-    // 横のスロットに入りうる文字の一覧
-    const horizontalCandidates = lengthMap.get(intersection.horizontalSlots.length);
-    if (!horizontalCandidates) return;
-    const horizontalLetters = horizontalCandidates.filter(c => c[intersection.horizontalLetterPosition]);
+    // 両方とも確定済みなら何もしない
+    if (intersection.verticalSlots.confirmedWord && intersection.horizontalSlots.confirmedWord) return;
 
-    // 交差点の文字を抽出
     const letters: string[] = [];
-    for (const vLetter of verticalLetters) {
-      for (const hLetter of horizontalLetters) {
-        if (vLetter[intersection.verticalLetterPosition] === hLetter[intersection.horizontalLetterPosition]) {
-          letters.push(vLetter[intersection.verticalLetterPosition]);
+    //　縦のスロットに入りうる文字の一覧
+    if (!intersection.verticalSlots.confirmedWord || !intersection.horizontalSlots.confirmedWord) {
+    const verticalLetters = intersection.verticalSlots.candidates.filter(c => c[intersection.verticalLetterPosition]);
+
+    // 横のスロットに入りうる文字の一覧
+    const horizontalLetters = intersection.horizontalSlots.candidates.filter(c => c[intersection.horizontalLetterPosition]);
+
+      // 交差点の文字を抽出
+      for (const vLetter of verticalLetters) {
+        for (const hLetter of horizontalLetters) {
+          if (vLetter[intersection.verticalLetterPosition] === hLetter[intersection.horizontalLetterPosition]) {
+            letters.push(vLetter[intersection.verticalLetterPosition]);
+          }
         }
+      }
+    }else{
+      // 片方が確定している場合、その文字を使う
+      if (intersection.verticalSlots.confirmedWord) {
+        letters.push(intersection.verticalSlots.confirmedWord[intersection.verticalLetterPosition]);
+      }
+      if (intersection.horizontalSlots.confirmedWord) {
+        letters.push(intersection.horizontalSlots.confirmedWord[intersection.horizontalLetterPosition]);
       }
     }
 
-    // 交点の文字から、候補の単語を抽出する
-    const filteredVerticalCandidates = verticalCandidates.filter(word => 
-      letters.includes(word[intersection.verticalLetterPosition])
-    );
-    const filteredHorizontalCandidates = horizontalCandidates.filter(word => 
-      letters.includes(word[intersection.horizontalLetterPosition])
-    );
-
-    // 候補を更新
-    if (intersection.verticalSlots.candidates){
+    // まだ未確定なら情報を絞る
+    if (!intersection.verticalSlots.confirmedWord){
+      // 交点の文字から、候補の単語を抽出する
       intersection.verticalSlots.candidates = intersection.verticalSlots.candidates.filter(word => 
-        filteredVerticalCandidates.includes(word)
+        letters.includes(word[intersection.verticalLetterPosition])
       );
-    }else{
-      intersection.verticalSlots.candidates = filteredVerticalCandidates;
     }
-    if (intersection.horizontalSlots.candidates){
+
+    if (!intersection.horizontalSlots.confirmedWord){
+      // 交点の文字から、候補の単語を抽出する
       intersection.horizontalSlots.candidates = intersection.horizontalSlots.candidates.filter(word => 
-        filteredHorizontalCandidates.includes(word)
+        letters.includes(word[intersection.horizontalLetterPosition])
       );
-    }else{ 
-      intersection.horizontalSlots.candidates = filteredHorizontalCandidates;
-    }
+    } 
+
   }
 
   // 各スロットに確定した文字を探して入れていく
@@ -364,6 +366,11 @@ export default function SkeletonPage() {
       lengthMap.get(length)!.push(word);
     }
 
+    // 各スロットに候補を設定
+    for (const slot of slots) {
+      slot.candidates = lengthMap.get(slot.length) ?? [];
+    }
+
     // すべての交点に対して、交差する文字から候補を絞る
     for (const intersection of intersections) {
       intersectionLetter(intersection, lengthMap);
@@ -372,26 +379,35 @@ export default function SkeletonPage() {
     // スロットのうち、候補が1個しかないものをuseListに追加する
     // 確定できる単語を順次配置していく（無限ループ）
     while (true) {
-      const trashWords : string[] = [];
+      const trashSlots : Slot[] = [];
       
       // 候補が1個しかないスロットを確定
       slots.forEach(slot => {
       if (slot.confirmedWord == null && slot.candidates && slot.candidates.length === 1) {
         slot.confirmedWord = slot.candidates[0];
         const word = slot.candidates[0];
-        trashWords.push(word);
+        trashSlots.push(slot);
       }
       });
 
-      for(const word of trashWords) {
-        for (const slot of slots) {
-          if (slot.confirmedWord === null && slot.candidates) {
-            slot.candidates = slot.candidates.filter(candidate => candidate !== word);
-          }
+      if (trashSlots.length === 0) {
+        break; // これ以上確定できる単語がない
+      }
+
+      // 確定したスロットを持つ交点から絞り込みをする
+      for (const intersection of intersections) {
+        if (trashSlots.some(slot => slot === intersection.verticalSlots || slot === intersection.horizontalSlots)) {
+          intersectionLetter(intersection, lengthMap);
         }
       }
-      if (trashWords.length === 0) {
-        break; // これ以上確定できる単語がない
+
+      // 確定した単語を候補から除外
+      for (const s of slots) {
+        if (s.confirmedWord === null) {
+          s.candidates = s.candidates.filter(
+            candidate => trashSlots.some(trash => trash.confirmedWord === candidate)
+          );
+        }
       }
     }
 
