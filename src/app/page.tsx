@@ -31,12 +31,7 @@ export default function Home() {
           </Link>
         </li>
         <li>
-          <Link href="/rgb" className="block bg-red-100 hover:bg-red-200 text-red-900 font-semibold rounded px-6 py-4 shadow">
-            光の三原色
-          </Link>
-        </li>
-        <li>
-          <Link href="/puzzle" className="block bg-indigo-100 hover:bg-indigo-200 text-indigo-900 font-semibold rounded px-6 py-4 shadow">
+          <Link href="/colorpuzzle" className="block bg-indigo-100 hover:bg-indigo-200 text-indigo-900 font-semibold rounded px-6 py-4 shadow">
             パズルゲーム
           </Link>
         </li>

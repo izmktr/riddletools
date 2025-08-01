@@ -11,7 +11,7 @@ interface Block {
   id: string;
   colors: [string, string]; // 2つの円の色
   position: Position;
-  rotation: 0 | 90; // 0度または90度回転
+  rotation: 0 | 90 | 180 | 270; // 0度または90度回転
   isOnField: boolean;
   isError: boolean;
   originalPosition: Position;
@@ -23,6 +23,13 @@ interface FieldCell {
 }
 
 export default function PuzzlePage() {
+  // ブロックサイズの定数定義
+  const BLOCK_SIZE = 100; // ブロックの1辺のサイズ
+  const BLOCK_WIDTH = 200;
+  const BLOCK_HEIGHT = 100;
+  const CIRCLE_SIZE = 80;
+  const CIRCLE_MARGIN = 10;
+  
   const [gameStarted, setGameStarted] = useState(false);
   const [timer, setTimer] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
@@ -30,12 +37,12 @@ export default function PuzzlePage() {
   
   // 初期ブロック配置
   const initialBlocks: Block[] = [
-    { id: 'rr', colors: ['red', 'red'], position: { x: 50, y: 450 }, rotation: 0, isOnField: false, isError: false, originalPosition: { x: 50, y: 450 } },
-    { id: 'rb', colors: ['red', 'blue'], position: { x: 200, y: 450 }, rotation: 0, isOnField: false, isError: false, originalPosition: { x: 200, y: 450 } },
-    { id: 'rg', colors: ['red', 'green'], position: { x: 350, y: 450 }, rotation: 0, isOnField: false, isError: false, originalPosition: { x: 350, y: 450 } },
-    { id: 'bb', colors: ['blue', 'blue'], position: { x: 50, y: 600 }, rotation: 0, isOnField: false, isError: false, originalPosition: { x: 50, y: 600 } },
-    { id: 'bg', colors: ['blue', 'green'], position: { x: 200, y: 600 }, rotation: 0, isOnField: false, isError: false, originalPosition: { x: 200, y: 600 } },
-    { id: 'gg', colors: ['green', 'green'], position: { x: 350, y: 600 }, rotation: 0, isOnField: false, isError: false, originalPosition: { x: 350, y: 600 } }
+    { id: 'rr', colors: ['red', 'red'], position: { x: 0, y: 350 }, rotation: 0, isOnField: false, isError: false, originalPosition: { x: 0, y: 350 } },
+    { id: 'rb', colors: ['red', 'blue'], position: { x: 250, y: 350 }, rotation: 0, isOnField: false, isError: false, originalPosition: { x: 250, y: 350 } },
+    { id: 'rg', colors: ['red', 'green'], position: { x: 500, y: 350 }, rotation: 0, isOnField: false, isError: false, originalPosition: { x: 500, y: 350 } },
+    { id: 'bb', colors: ['blue', 'blue'], position: { x: 0, y: 500 }, rotation: 0, isOnField: false, isError: false, originalPosition: { x: 0, y: 500 } },
+    { id: 'bg', colors: ['blue', 'green'], position: { x: 250, y: 500 }, rotation: 0, isOnField: false, isError: false, originalPosition: { x: 250, y: 500 } },
+    { id: 'gg', colors: ['green', 'green'], position: { x: 500, y: 500 }, rotation: 0, isOnField: false, isError: false, originalPosition: { x: 500, y: 500 } }
   ];
 
   const [blocks, setBlocks] = useState<Block[]>(initialBlocks);
@@ -149,14 +156,97 @@ export default function PuzzlePage() {
       if (gridPos.col < 2) {
         positions.push({ row: gridPos.row, col: gridPos.col + 1 });
       }
-    } else {
+    } else if (block.rotation === 90) {
       // 縦向き: 下隣のセル
       if (gridPos.row < 2) {
         positions.push({ row: gridPos.row + 1, col: gridPos.col });
       }
+    } else if (block.rotation === 180) {
+      // 横向き（反転）: 左隣のセル
+      if (gridPos.col > 0) {
+        positions.push({ row: gridPos.row, col: gridPos.col - 1 });
+      }
+    } else if (block.rotation === 270) {
+      // 縦向き（反転）: 上隣のセル
+      if (gridPos.row > 0) {
+        positions.push({ row: gridPos.row - 1, col: gridPos.col });
+      }
     }
 
     return positions;
+  };
+
+  // 円形の重なり部分の色を計算
+  const getCircleOverlapColor = (block: Block): { circle1Color: string; circle2Color: string; overlapColor: string | null } => {
+    const circle1Pos = getCirclePosition(block, 0);
+    const circle2Pos = getCirclePosition(block, 1);
+    
+    // 円同士の距離を計算
+    const distance = Math.sqrt(
+      Math.pow(circle2Pos.x - circle1Pos.x, 2) + 
+      Math.pow(circle2Pos.y - circle1Pos.y, 2)
+    );
+    
+    // 円の半径
+    const radius = CIRCLE_SIZE / 2;
+    
+    // 重なりがあるかチェック（距離が直径より小さい場合）
+    if (distance < CIRCLE_SIZE) {
+      const overlapColor = mixColors([block.colors[0], block.colors[1]]);
+      return {
+        circle1Color: block.colors[0],
+        circle2Color: block.colors[1],
+        overlapColor
+      };
+    }
+    
+    return {
+      circle1Color: block.colors[0],
+      circle2Color: block.colors[1],
+      overlapColor: null
+    };
+  };
+
+  // 円の絶対位置を取得
+  const getCirclePosition = (block: Block, circleIndex: 0 | 1): { x: number; y: number } => {
+    let offsetX = 0, offsetY = 0;
+    
+    if (circleIndex === 0) {
+      // 第1の円
+      if (block.rotation === 0) {
+        offsetX = CIRCLE_MARGIN;
+        offsetY = CIRCLE_MARGIN;
+      } else if (block.rotation === 90) {
+        offsetX = CIRCLE_MARGIN;
+        offsetY = CIRCLE_MARGIN;
+      } else if (block.rotation === 180) {
+        offsetX = BLOCK_SIZE * 2 - CIRCLE_SIZE - CIRCLE_MARGIN;
+        offsetY = CIRCLE_MARGIN;
+      } else if (block.rotation === 270) {
+        offsetX = CIRCLE_MARGIN;
+        offsetY = BLOCK_SIZE * 2 - CIRCLE_SIZE - CIRCLE_MARGIN;
+      }
+    } else {
+      // 第2の円
+      if (block.rotation === 0) {
+        offsetX = BLOCK_SIZE * 2 - CIRCLE_SIZE - CIRCLE_MARGIN;
+        offsetY = CIRCLE_MARGIN;
+      } else if (block.rotation === 90) {
+        offsetX = CIRCLE_MARGIN;
+        offsetY = BLOCK_SIZE * 2 - CIRCLE_SIZE - CIRCLE_MARGIN;
+      } else if (block.rotation === 180) {
+        offsetX = CIRCLE_MARGIN;
+        offsetY = CIRCLE_MARGIN;
+      } else if (block.rotation === 270) {
+        offsetX = CIRCLE_MARGIN;
+        offsetY = CIRCLE_MARGIN;
+      }
+    }
+    
+    return {
+      x: block.position.x + offsetX + CIRCLE_SIZE / 2,
+      y: block.position.y + offsetY + CIRCLE_SIZE / 2
+    };
   };
 
   // フィールドを更新
@@ -200,7 +290,7 @@ export default function PuzzlePage() {
       while (!placed && attempts < 100) {
         const row = Math.floor(Math.random() * 3);
         const col = Math.floor(Math.random() * 3);
-        const rotation = Math.random() < 0.5 ? 0 : 90;
+        const rotation = [0, 90, 180, 270][Math.floor(Math.random() * 4)];
         
         // 配置可能かチェック
         const positions = [];
@@ -210,6 +300,10 @@ export default function PuzzlePage() {
           positions.push({ row, col: col + 1 });
         } else if (rotation === 90 && row < 2) {
           positions.push({ row: row + 1, col });
+        } else if (rotation === 180 && col > 0) {
+          positions.push({ row, col: col - 1 });
+        } else if (rotation === 270 && row > 0) {
+          positions.push({ row: row - 1, col });
         }
         
         // 範囲外チェック
@@ -230,7 +324,7 @@ export default function PuzzlePage() {
             x: 50 + col * 100, 
             y: 100 + row * 100 
           };
-          block.rotation = rotation as 0 | 90;
+          block.rotation = rotation as 0 | 90 | 180 | 270;
           block.isOnField = true;
           placed = true;
         }
@@ -374,8 +468,8 @@ export default function PuzzlePage() {
   const handleRotate = useCallback((blockId: string) => {
     setBlocks(prev => prev.map(block => {
       if (block.id === blockId) {
-        const newRotation = block.rotation === 0 ? 90 : 0;
-        const updatedBlock = { ...block, rotation: newRotation as 0 | 90 };
+        const newRotation = (block.rotation + 90) % 360;
+        const updatedBlock = { ...block, rotation: newRotation as 0 | 90 | 180 | 270 };
         
         if (block.isOnField) {
           // フィールド上なら衝突チェック
@@ -455,11 +549,12 @@ export default function PuzzlePage() {
         )}
       </div>
 
+
       <div className="flex gap-8 mb-8">
-        {/* 左側：プレイヤーフィールド */}
-        <div>
+        {/* 左側：プレイヤーフィールドとブロック */}
+        <div className="relative">
           <h3 className="text-lg font-bold mb-2">プレイヤーフィールド</h3>
-          <div className="grid grid-cols-3 gap-1 border-2 border-gray-400" style={{ width: '300px', height: '300px' }}>
+          <div className="grid grid-cols-3 border-2 border-gray-400" style={{ width: '300px', height: '300px' }}>
             {playerField.map((row, rowIndex) =>
               row.map((cell, colIndex) => (
                 <div
@@ -474,12 +569,95 @@ export default function PuzzlePage() {
               ))
             )}
           </div>
+          {/* ブロック配置エリアをプレイヤーフィールドに完全に重ねる */}
+          <div className="absolute top-0 left-0" style={{ height: '300px', width: '300px' }}>
+            {blocks.map((block) => (
+              <div
+                key={block.id}
+                className={`absolute cursor-move border-2 ${
+                  block.isError ? 'border-red-500 bg-red-100' : 'border-gray-400 bg-white'
+                }`}
+                style={{
+                  left: `${block.position.x}px`,
+                  top: `${block.position.y}px`, // 上に100pxずらしてフィールド下に揃える
+                  width: block.rotation === 0 || block.rotation === 180 ? `${BLOCK_SIZE * 2}px` : `${BLOCK_SIZE}px`,
+                  height: block.rotation === 0 || block.rotation === 180 ? `${BLOCK_SIZE}px` : `${BLOCK_SIZE * 2}px`,
+                  zIndex: dragState.dragId === block.id ? 1000 : 1,
+                }}
+                onMouseDown={(e) => handleMouseDown(e, block.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  handleRotate(block.id);
+                }}
+                onDoubleClick={() => handleRotate(block.id)}
+              >
+                {/* 円形の模様 */}
+                {(() => {
+                  const circleData = getCircleOverlapColor(block);
+                  return (
+                    <>
+                      {/* 第1の円 */}
+                      <div
+                        className="absolute rounded-full border-2 border-gray-600"
+                        style={{
+                          width: `${CIRCLE_SIZE}px`,
+                          height: `${CIRCLE_SIZE}px`,
+                          backgroundColor: circleData.circle1Color,
+                          left: block.rotation === 0 ? `${CIRCLE_MARGIN}px` : 
+                                block.rotation === 90 ? `${CIRCLE_MARGIN}px` : 
+                                block.rotation === 180 ? `${BLOCK_SIZE * 2 - CIRCLE_SIZE - CIRCLE_MARGIN}px` : `${CIRCLE_MARGIN}px`,
+                          top: block.rotation === 0 ? `${CIRCLE_MARGIN}px` : 
+                               block.rotation === 90 ? `${CIRCLE_MARGIN}px` : 
+                               block.rotation === 180 ? `${CIRCLE_MARGIN}px` : `${BLOCK_SIZE * 2 - CIRCLE_SIZE - CIRCLE_MARGIN}px`,
+                          zIndex: circleData.overlapColor ? 1 : 2,
+                        }}
+                      />
+                      {/* 第2の円 */}
+                      <div
+                        className="absolute rounded-full border-2 border-gray-600"
+                        style={{
+                          width: `${CIRCLE_SIZE}px`,
+                          height: `${CIRCLE_SIZE}px`,
+                          backgroundColor: circleData.circle2Color,
+                          left: block.rotation === 0 ? `${BLOCK_SIZE * 2 - CIRCLE_SIZE - CIRCLE_MARGIN}px` : 
+                                block.rotation === 90 ? `${CIRCLE_MARGIN}px` : 
+                                block.rotation === 180 ? `${CIRCLE_MARGIN}px` : `${CIRCLE_MARGIN}px`,
+                          top: block.rotation === 0 ? `${CIRCLE_MARGIN}px` : 
+                               block.rotation === 90 ? `${BLOCK_SIZE * 2 - CIRCLE_SIZE - CIRCLE_MARGIN}px` : 
+                               block.rotation === 180 ? `${CIRCLE_MARGIN}px` : `${CIRCLE_MARGIN}px`,
+                          zIndex: circleData.overlapColor ? 1 : 2,
+                        }}
+                      />
+                      {/* 重なり部分の混色円 */}
+                      {circleData.overlapColor && (
+                        <div
+                          className="absolute rounded-full border-2 border-gray-600"
+                          style={{
+                            width: `${CIRCLE_SIZE * 0.6}px`, // 重なり部分は少し小さく
+                            height: `${CIRCLE_SIZE * 0.6}px`,
+                            backgroundColor: circleData.overlapColor,
+                            left: block.rotation === 0 ? `${CIRCLE_MARGIN + (BLOCK_SIZE * 2 - CIRCLE_SIZE - CIRCLE_MARGIN * 2) / 2}px` : 
+                                  block.rotation === 90 ? `${CIRCLE_MARGIN}px` : 
+                                  block.rotation === 180 ? `${CIRCLE_MARGIN + (BLOCK_SIZE * 2 - CIRCLE_SIZE - CIRCLE_MARGIN * 2) / 2}px` : `${CIRCLE_MARGIN}px`,
+                            top: block.rotation === 0 ? `${CIRCLE_MARGIN + (CIRCLE_SIZE * 0.2)}px` : 
+                                 block.rotation === 90 ? `${CIRCLE_MARGIN + (BLOCK_SIZE * 2 - CIRCLE_SIZE - CIRCLE_MARGIN * 2) / 2}px` : 
+                                 block.rotation === 180 ? `${CIRCLE_MARGIN + (CIRCLE_SIZE * 0.2)}px` : `${CIRCLE_MARGIN + (BLOCK_SIZE * 2 - CIRCLE_SIZE - CIRCLE_MARGIN * 2) / 2}px`,
+                            zIndex: 3,
+                          }}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* 右側：例題フィールド */}
         <div>
           <h3 className="text-lg font-bold mb-2">目標</h3>
-          <div className="grid grid-cols-3 gap-1 border-2 border-gray-400" style={{ width: '300px', height: '300px' }}>
+          <div className="grid grid-cols-3 border-2 border-gray-400" style={{ width: '300px', height: '300px' }}>
             {targetField.map((row, rowIndex) =>
               row.map((cell, colIndex) => (
                 <div
@@ -495,49 +673,6 @@ export default function PuzzlePage() {
             )}
           </div>
         </div>
-      </div>
-
-      {/* ブロック */}
-      <div className="relative" style={{ height: '300px' }}>
-        {blocks.map((block) => (
-          <div
-            key={block.id}
-            className={`absolute cursor-move border-2 ${
-              block.isError ? 'border-red-500 bg-red-100' : 'border-gray-400 bg-white'
-            }`}
-            style={{
-              left: `${block.position.x}px`,
-              top: `${block.position.y}px`,
-              width: block.rotation === 0 ? '200px' : '100px',
-              height: block.rotation === 0 ? '100px' : '200px',
-              zIndex: dragState.dragId === block.id ? 1000 : 1,
-            }}
-            onMouseDown={(e) => handleMouseDown(e, block.id)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              handleRotate(block.id);
-            }}
-            onDoubleClick={() => handleRotate(block.id)}
-          >
-            {/* 円形の模様 */}
-            <div
-              className="absolute w-8 h-8 rounded-full border-2 border-gray-600"
-              style={{
-                backgroundColor: block.colors[0],
-                left: block.rotation === 0 ? '25px' : '36px',
-                top: block.rotation === 0 ? '36px' : '25px',
-              }}
-            />
-            <div
-              className="absolute w-8 h-8 rounded-full border-2 border-gray-600"
-              style={{
-                backgroundColor: block.colors[1],
-                left: block.rotation === 0 ? '125px' : '36px',
-                top: block.rotation === 0 ? '36px' : '125px',
-              }}
-            />
-          </div>
-        ))}
       </div>
 
       {/* 説明 */}
