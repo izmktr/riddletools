@@ -23,6 +23,8 @@ interface Coordinate {
   y: number;
 }
 
+const ThinWallGitter = 1; // 壁の細さを定義
+
 export default function MazePage() {
   const [width, setWidth] = useState(5);
   const [height, setHeight] = useState(5);
@@ -212,13 +214,11 @@ export default function MazePage() {
   }, [tempWidth, tempHeight, width, height, cells, edges]);
 
   // 壁をクリックした時の処理
-  const handleWallClick = useCallback((row: number, col: number, edge: 'top' | 'right' | 'bottom' | 'left') => {
+  const handleWallClick = useCallback((row: number, col: number, edge: 'right' | 'bottom') => {
     setEdges(prev => {
       const newEdges = prev.map(row => row.map(cell => ({ ...cell })));
       
       // 盤面の外側の辺は変化させない
-      if (edge === 'top' && row === 0) return prev;
-      if (edge === 'left' && col === 0) return prev;
       if (edge === 'bottom' && row === height - 1) return prev;
       if (edge === 'right' && col === width - 1) return prev;
       
@@ -227,12 +227,8 @@ export default function MazePage() {
       newEdges[row][col][edge] = currentEdge === 'wall' ? 'normal' : 'wall';
       
       // 隣接するセルの対応する辺も同期
-      if (edge === 'top' && row > 0) {
-        newEdges[row - 1][col].bottom = newEdges[row][col][edge];
-      } else if (edge === 'bottom' && row < height - 1) {
+      if (edge === 'bottom' && row < height - 1) {
         newEdges[row + 1][col].top = newEdges[row][col][edge];
-      } else if (edge === 'left' && col > 0) {
-        newEdges[row][col - 1].right = newEdges[row][col][edge];
       } else if (edge === 'right' && col < width - 1) {
         newEdges[row][col + 1].left = newEdges[row][col][edge];
       }
@@ -327,14 +323,23 @@ export default function MazePage() {
     }
   }, [mode]);
 
+  // モード判定関数
+  const isWallMode = useCallback((): boolean => {
+    return mode === 'wall';
+  }, [mode]);
+
+  const isCellMode = useCallback((): boolean => {
+    return mode === 'cell';
+  }, [mode]);
+
   const getCellStyle = (cell: Cell) => {
     const baseStyle = "w-12 h-12 flex items-center justify-center text-lg font-bold";
-    const interactiveStyle = mode !== 'wall' ? "cursor-pointer" : "cursor-default";
-    const hoverStyle = mode !== 'wall' ? "hover:bg-gray-100" : "";
+    const interactiveStyle = !isWallMode() ? "cursor-pointer" : "cursor-default";
+    const hoverStyle = !isWallMode() ? "hover:bg-gray-100" : "";
     
     switch (cell.type) {
       case 'blocked':
-        return `${baseStyle} ${interactiveStyle} bg-black text-white`;
+        return `${baseStyle} ${interactiveStyle} bg-black text-white z-3`;
       case 'start':
         return `${baseStyle} ${interactiveStyle} bg-white text-red-600`;
       case 'goal':
@@ -361,7 +366,7 @@ export default function MazePage() {
     }
     
     const baseStyle = edge === 'wall' ? "bg-black" : "bg-gray-300";
-    const hoverStyle = mode === 'wall' ? "hover:bg-gray-400" : "";
+    const hoverStyle = isWallMode() ? "hover:bg-gray-400" : "";
     
     return `${baseStyle} ${hoverStyle}`;
   };
@@ -374,60 +379,64 @@ export default function MazePage() {
     if (edge === 'wall') {
       return direction === 'horizontal' ? "h-2" : "w-2"; // 壁は太い
     } else {
-      return direction === 'horizontal' ? "h-0.5" : "w-0.5"; // 通常の辺は細い
+      if (isWallMode()) {
+        return direction === 'horizontal' ? "h-1" : "w-1"; // 壁選択モードではちょっと太く
+      }else{
+        return direction === 'horizontal' ? "h-0.5" : "w-0.5"; // 通常の辺は細い
+      }
     }
   };
 
   const renderCell = (cell: Cell, rowIndex: number, colIndex: number) => {
     const cellEdges = edges[rowIndex][colIndex];
-    const isOuterTop = rowIndex === 0;
-    const isOuterLeft = colIndex === 0;
     const isOuterBottom = rowIndex === height - 1;
     const isOuterRight = colIndex === width - 1;
+    const isOuterTop = rowIndex === 0;
+    const isOuterLeft = colIndex === 0;
     
     // 壁モードかどうかで辺とセルのクリック可能性を制御
-    const isWallMode = mode === 'wall';
+    const wallModeActive = isWallMode();
     
     // このセルがパスに含まれているかチェック
     const isInPath = solutionPath.some(coord => coord.x === colIndex && coord.y === rowIndex);
     const pathIndex = solutionPath.findIndex(coord => coord.x === colIndex && coord.y === rowIndex);
+    const rightPos = cellEdges.right !== 'wall' ? 1 - ThinWallGitter : 1;
+    const bottomPos = cellEdges.bottom !== 'wall' ? 1 : 1;
 
     return (
       <div key={`${rowIndex}-${colIndex}`} className="relative">
-        {/* 上の辺 */}
-        <div
-          className={`absolute -top-1 left-0 right-0 ${getWallThickness(cellEdges.top, isOuterTop, 'horizontal')} ${
-            isWallMode && !isOuterTop ? 'cursor-pointer' : 'cursor-default'
-          } ${getWallStyle(cellEdges.top, isOuterTop)}`}
-          onClick={() => isWallMode && !isOuterTop && handleWallClick(rowIndex, colIndex, 'top')}
-          style={{ zIndex: 10 }}
-        />
+        {/* 上の辺（外壁のみ） */}
+        {isOuterTop && (
+          <div
+            className={`absolute -top-1 left-0 right-0 ${getWallThickness('wall', true, 'horizontal')} ${getWallStyle('wall', true)}`}
+            style={{ zIndex: 10 }}
+          />
+        )}
         
-        {/* 左の辺 */}
-        <div
-          className={`absolute -left-1 top-0 bottom-0 ${getWallThickness(cellEdges.left, isOuterLeft, 'vertical')} ${
-            isWallMode && !isOuterLeft ? 'cursor-pointer' : 'cursor-default'
-          } ${getWallStyle(cellEdges.left, isOuterLeft)}`}
-          onClick={() => isWallMode && !isOuterLeft && handleWallClick(rowIndex, colIndex, 'left')}
-          style={{ zIndex: 10 }}
-        />
+        {/* 左の辺（外壁のみ） */}
+        {isOuterLeft && (
+          <div
+            className={`absolute -left-1 top-0 bottom-0 ${getWallThickness('wall', true, 'vertical')} ${getWallStyle('wall', true)}`}
+            style={{ zIndex: 10 }}
+          />
+        )}
         
         {/* 右の辺 */}
         <div
-          className={`absolute -right-1 top-0 bottom-0 ${getWallThickness(cellEdges.right, isOuterRight, 'vertical')} ${
-            isWallMode && !isOuterRight ? 'cursor-pointer' : 'cursor-default'
+          className={`absolute -right-${rightPos} top-0 bottom-0 ${getWallThickness(cellEdges.right, isOuterRight, 'vertical')} ${
+            wallModeActive && !isOuterRight ? 'cursor-pointer' : 'cursor-default'
           } ${getWallStyle(cellEdges.right, isOuterRight)}`}
-          onClick={() => isWallMode && !isOuterRight && handleWallClick(rowIndex, colIndex, 'right')}
-          style={{ zIndex: 10 }}
+          onClick={() => wallModeActive && !isOuterRight && handleWallClick(rowIndex, colIndex, 'right')}
+          style={{ zIndex: cellEdges.right === 'wall' ? 10 : 5 }}
         />
         
         {/* 下の辺 */}
         <div
-          className={`absolute -bottom-1 left-0 right-0 ${getWallThickness(cellEdges.bottom, isOuterBottom, 'horizontal')} ${
-            isWallMode && !isOuterBottom ? 'cursor-pointer' : 'cursor-default'
+          className={`absolute -bottom-${bottomPos} left-0 right-0 ${getWallThickness(cellEdges.bottom, isOuterBottom, 'horizontal')} ${
+            wallModeActive && !isOuterBottom ? 'cursor-pointer' : 'cursor-default'
           } ${getWallStyle(cellEdges.bottom, isOuterBottom)}`}
-          onClick={() => isWallMode && !isOuterBottom && handleWallClick(rowIndex, colIndex, 'bottom')}
-          style={{ zIndex: 10 }}
+          onClick={() => wallModeActive && !isOuterBottom && handleWallClick(rowIndex, colIndex, 'bottom')}
+          style={{ zIndex: cellEdges.bottom === 'wall' ? 10 : 5 }}
         />
         
         {/* パスの線を描画 */}
@@ -479,8 +488,8 @@ export default function MazePage() {
         {/* セル本体 */}
         <div
           className={getCellStyle(cell)}
-          onClick={() => !isWallMode && handleCellClick(rowIndex, colIndex)}
-          style={{ zIndex: 5 }}
+          onClick={() => !wallModeActive && handleCellClick(rowIndex, colIndex)}
+          style={{ zIndex: 3 }}
         >
           {getCellContent(cell)}
         </div>
@@ -590,7 +599,7 @@ export default function MazePage() {
 
       {/* 盤面 */}
       <div className="mb-6">
-        <div className="inline-block border-2 border-black p-1">
+        <div className="inline-block border-2 border-black">
           {cells.map((row, rowIndex) => (
             <div key={rowIndex} className="flex">
               {row.map((cell, colIndex) => renderCell(cell, rowIndex, colIndex))}
