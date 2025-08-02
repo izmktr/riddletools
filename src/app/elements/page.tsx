@@ -249,9 +249,9 @@ export default function ElementsPage() {
           <h2 className="font-bold text-blue-800 mb-2">使い方:</h2>
           <ul className="text-blue-700 space-y-1">
             <li><strong>数字入力:</strong> スペースで区切った原子番号を元素記号に変換</li>
-            <li className="ml-4">例: "1 6 8" → "H(水素) C(炭素) O(酸素)"</li>
+            <li className="ml-4">例: &quot;1 6 8&quot; → &quot;H(水素) C(炭素) O(酸素)&quot;</li>
             <li><strong>アルファベット入力:</strong> 文字列を元素記号の組み合わせに分割</li>
-            <li className="ml-4">例: "CARBON" → "C(6) Ar(18) B(5) O(8) N(7)" など</li>
+            <li className="ml-4">例: &quot;CARBON&quot; → &quot;C(6) Ar(18) B(5) O(8) N(7)&quot; など</li>
           </ul>
         </div>
         
