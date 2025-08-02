@@ -35,6 +35,11 @@ export default function Home() {
             元素記号変換ツール
           </Link>
         </li>
+        <li>
+          <Link href="/braille" className="block bg-indigo-100 hover:bg-indigo-200 text-indigo-900 font-semibold rounded px-6 py-4 shadow">
+            点字変換ツール
+          </Link>
+        </li>
       </ul>
     </main>
   );

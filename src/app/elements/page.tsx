@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 
 // 元素データ（原子番号1-118）
 const elements = [
@@ -242,6 +243,11 @@ export default function ElementsPage() {
 
   return (
     <div className="container mx-auto p-6 max-w-4xl">
+      <div className="mb-4">
+        <Link href="/" className="text-blue-500 hover:text-blue-700 text-sm">
+          ← トップに戻る
+        </Link>
+      </div>
       <h1 className="text-3xl font-bold mb-6">元素記号変換ツール</h1>
       
       <div className="mb-6">

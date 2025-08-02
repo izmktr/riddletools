@@ -106,12 +106,17 @@ export default function PickPage() {
 
   return (
     <main className="max-w-xl mx-auto p-6">
+      <div className="mb-4">
+        <Link href="/" className="text-blue-500 hover:text-blue-700 text-sm">
+          ← トップに戻る
+        </Link>
+      </div>
+      <h1 className="text-2xl font-bold mb-4">文字拾いツール</h1>
       <div className="flex items-center mb-4 gap-2">
         <button
           className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
           onClick={() => setShowManual(true)}
         >使い方</button>
-        <Link href="/" className="inline-block px-4 py-2 bg-gray-100 rounded hover:bg-gray-200">トップに戻る</Link>
       </div>
       {showManual && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
