@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import pako from 'pako';
 
@@ -25,6 +25,16 @@ interface Intersection{
   horizontalLetterPosition: number;
 }
 
+interface ExportData {
+  words: string;
+  board: CellState[][];
+}
+
+interface CompressedData {
+  words: string;
+  board: {x: number, y: number, w: number, h: number, v: string};
+}
+
 const BOARD_WIDTH = 24;
 const BOARD_HEIGHT = 16;
 
@@ -42,59 +52,8 @@ export default function SkeletonPage() {
   const [showExportModal, setShowExportModal] = useState(false);
   const boardRef = useRef<HTMLDivElement>(null);
 
-  // ページ読み込み時にURLパラメータから状態を復元
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const dataParam = urlParams.get('data');
-    
-    if (dataParam) {
-      try {
-        const data = decompressData(dataParam);
-        
-        if (data) {
-          if (data.words) {
-            setWords(data.words);
-          }
-          if (data.board && Array.isArray(data.board) && data.board.length === BOARD_HEIGHT) {
-            setBoard(data.board);
-          }
-        }
-      } catch (e) {
-        console.error('Failed to restore data from URL:', e);
-      }
-    }
-  }, []);
-
-  // データ圧縮関数
-  const compressData = (data: any): string => {
-      try {
-        // ボードデータを効率的な形式に変換
-        const compressedData = {
-          words: data.words,
-          board: compressBoard(data.board)
-        };
-        
-        const jsonString = JSON.stringify(compressedData);
-        // pakoを使用してzlib互換の圧縮を実行 (Uint8Array)
-        const compressed = pako.deflate(jsonString);
-
-        // Uint8Arrayをbtoaで扱えるバイナリ文字列に変換
-        const binaryString = Array.from(compressed).map(byte => String.fromCharCode(byte)).join('');
-
-        // Base64エンコードし、URL-safeな形式に変換
-        return btoa(binaryString)
-          .replace(/\+/g, '-') // + -> -
-          .replace(/\//g, '_') // / -> _
-          .replace(/=/g, '');  // パディングを削除
-      } catch (e) {
-        console.error('Failed to compress data:', e);
-        // 圧縮に失敗した場合は、フォールバックとして単純なURIエンコードを行う
-        return encodeURIComponent(JSON.stringify(data));
-      }
-  };
-
   // データ解凍関数
-  const decompressData = (compressed: string): any => {
+  const decompressData = useCallback((compressed: string): ExportData | CompressedData | null => {
     // 1. URIエンコードされたJSONかチェック (フォールバック or 古い形式)
     if (compressed.startsWith('%7B') || compressed.startsWith('{')) {
       try {
@@ -144,6 +103,57 @@ export default function SkeletonPage() {
       console.error('Failed to decompress data with pako:', pakoError);
       return null;
     }
+  }, []);
+
+  // ページ読み込み時にURLパラメータから状態を復元
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const dataParam = urlParams.get('data');
+    
+    if (dataParam) {
+      try {
+        const data = decompressData(dataParam);
+        
+        if (data) {
+          if (data.words) {
+            setWords(data.words);
+          }
+          if (data.board && Array.isArray(data.board) && data.board.length === BOARD_HEIGHT) {
+            setBoard(data.board);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to restore data from URL:', e);
+      }
+    }
+  }, [decompressData]);
+
+  // データ圧縮関数
+  const compressData = (data: ExportData): string => {
+      try {
+        // ボードデータを効率的な形式に変換
+        const compressedData = {
+          words: data.words,
+          board: compressBoard(data.board)
+        };
+        
+        const jsonString = JSON.stringify(compressedData);
+        // pakoを使用してzlib互換の圧縮を実行 (Uint8Array)
+        const compressed = pako.deflate(jsonString);
+
+        // Uint8Arrayをbtoaで扱えるバイナリ文字列に変換
+        const binaryString = Array.from(compressed).map(byte => String.fromCharCode(byte)).join('');
+
+        // Base64エンコードし、URL-safeな形式に変換
+        return btoa(binaryString)
+          .replace(/\+/g, '-') // + -> -
+          .replace(/\//g, '_') // / -> _
+          .replace(/=/g, '');  // パディングを削除
+      } catch (e) {
+        console.error('Failed to compress data:', e);
+        // 圧縮に失敗した場合は、フォールバックとして単純なURIエンコードを行う
+        return encodeURIComponent(JSON.stringify(data));
+      }
   };
 
   // ボードを効率的に圧縮、復元する関数
