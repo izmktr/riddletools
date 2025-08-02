@@ -68,7 +68,13 @@ export default function SkeletonPage() {
   // データ圧縮関数
   const compressData = (data: any): string => {
       try {
-        const jsonString = JSON.stringify(data);
+        // ボードデータを効率的な形式に変換
+        const compressedData = {
+          words: data.words,
+          board: compressBoard(data.board)
+        };
+        
+        const jsonString = JSON.stringify(compressedData);
         // pakoを使用してzlib互換の圧縮を実行 (Uint8Array)
         const compressed = pako.deflate(jsonString);
 
@@ -125,12 +131,90 @@ export default function SkeletonPage() {
       }
 
       const restored = pako.inflate(bytes, { to: 'string' });
-      return JSON.parse(restored);
+      const data = JSON.parse(restored);
+      
+      // 新しい圧縮形式のボードデータを復元
+      if (data.board && typeof data.board === 'object' && 'x' in data.board) {
+        data.board = restoreBoard(data.board);
+      }
+      
+      return data;
     } catch (pakoError) {
       // pakoが失敗した場合
       console.error('Failed to decompress data with pako:', pakoError);
       return null;
     }
+  };
+
+  // ボードを効率的に圧縮、復元する関数
+  const compressBoard = (board: CellState[][]): {x: number, y: number, w: number, h: number, v: string} => {
+    // 黄色のマスの範囲を特定
+    let minX = BOARD_WIDTH, maxX = -1;
+    let minY = BOARD_HEIGHT, maxY = -1;
+    
+    for (let row = 0; row < BOARD_HEIGHT; row++) {
+      for (let col = 0; col < BOARD_WIDTH; col++) {
+        if (board[row][col] === "yellow") {
+          minX = Math.min(minX, col);
+          maxX = Math.max(maxX, col);
+          minY = Math.min(minY, row);
+          maxY = Math.max(maxY, row);
+        }
+      }
+    }
+    
+    // 黄色のマスがない場合
+    if (maxX === -1) {
+      return {x: 0, y: 0, w: 0, h: 0, v: ""};
+    }
+    
+    const width = maxX - minX + 1;
+    const height = maxY - minY + 1;
+    
+    // 範囲内のデータを文字列に変換
+    let valueString = "";
+    for (let row = minY; row <= maxY; row++) {
+      for (let col = minX; col <= maxX; col++) {
+        valueString += board[row][col] === "yellow" ? "1" : "0";
+      }
+    }
+    
+    return {
+      x: minX,
+      y: minY,
+      w: width,
+      h: height,
+      v: valueString
+    };
+  };
+
+  const restoreBoard = (compressed: {x: number, y: number, w: number, h: number, v: string}): CellState[][] => {
+    // 初期化（全て白）
+    const board: CellState[][] = Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill("white"));
+    
+    // データがない場合は白いボードを返す
+    if (compressed.w === 0 || compressed.h === 0 || !compressed.v) {
+      return board;
+    }
+    
+    // 圧縮されたデータを復元
+    let index = 0;
+    for (let row = 0; row < compressed.h; row++) {
+      for (let col = 0; col < compressed.w; col++) {
+        if (index < compressed.v.length) {
+          const boardRow = compressed.y + row;
+          const boardCol = compressed.x + col;
+          
+          // ボード範囲内かチェック
+          if (boardRow >= 0 && boardRow < BOARD_HEIGHT && boardCol >= 0 && boardCol < BOARD_WIDTH) {
+            board[boardRow][boardCol] = compressed.v[index] === "1" ? "yellow" : "white";
+          }
+          index++;
+        }
+      }
+    }
+    
+    return board;
   };
 
   // エクスポート機能
