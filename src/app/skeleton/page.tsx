@@ -1,6 +1,7 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
+import pako from 'pako';
 
 type CellState = "white" | "yellow";
 
@@ -37,7 +38,125 @@ export default function SkeletonPage() {
   const [dragMode, setDragMode] = useState<CellState>("white");
   const [unusedWords, setUnusedWords] = useState<string[]>([]);
   const [solvedGrid, setSolvedGrid] = useState<string[][] | null>(null);
+  const [exportUrl, setExportUrl] = useState<string>("");
+  const [showExportModal, setShowExportModal] = useState(false);
   const boardRef = useRef<HTMLDivElement>(null);
+
+  // ページ読み込み時にURLパラメータから状態を復元
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const dataParam = urlParams.get('data');
+    
+    if (dataParam) {
+      try {
+        const data = decompressData(dataParam);
+        
+        if (data) {
+          if (data.words) {
+            setWords(data.words);
+          }
+          if (data.board && Array.isArray(data.board) && data.board.length === BOARD_HEIGHT) {
+            setBoard(data.board);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to restore data from URL:', e);
+      }
+    }
+  }, []);
+
+  // データ圧縮関数
+  const compressData = (data: any): string => {
+      try {
+        const jsonString = JSON.stringify(data);
+        // pakoを使用してzlib互換の圧縮を実行 (Uint8Array)
+        const compressed = pako.deflate(jsonString);
+
+        // Uint8Arrayをbtoaで扱えるバイナリ文字列に変換
+        const binaryString = Array.from(compressed).map(byte => String.fromCharCode(byte)).join('');
+
+        // Base64エンコードし、URL-safeな形式に変換
+        return btoa(binaryString)
+          .replace(/\+/g, '-') // + -> -
+          .replace(/\//g, '_') // / -> _
+          .replace(/=/g, '');  // パディングを削除
+      } catch (e) {
+        console.error('Failed to compress data:', e);
+        // 圧縮に失敗した場合は、フォールバックとして単純なURIエンコードを行う
+        return encodeURIComponent(JSON.stringify(data));
+      }
+  };
+
+  // データ解凍関数
+  const decompressData = (compressed: string): any => {
+    // 1. URIエンコードされたJSONかチェック (フォールバック or 古い形式)
+    if (compressed.startsWith('%7B') || compressed.startsWith('{')) {
+      try {
+        return JSON.parse(decodeURIComponent(compressed));
+      } catch (e) {
+        console.error('Failed to parse URI-encoded data:', e);
+        return null;
+      }
+    }
+
+    // これ以降はBase64エンコードされていると仮定
+    let binaryString: string;
+    try {
+      // URL-safeなBase64を通常のBase64に戻す
+      let base64 = compressed.replace(/-/g, '+').replace(/_/g, '/');
+
+      // 削除されたパディングを復元
+      while (base64.length % 4) {
+        base64 += '=';
+      }
+
+      binaryString = atob(base64);
+    } catch (e) {
+      console.error('Failed to decode Base64 string:', e);
+      return null;
+    }
+
+    // 2. 新しいpako形式を試す
+    try {
+      // バイナリ文字列をUint8Arrayに変換
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      const restored = pako.inflate(bytes, { to: 'string' });
+      return JSON.parse(restored);
+    } catch (pakoError) {
+      // pakoが失敗した場合
+      console.error('Failed to decompress data with pako:', pakoError);
+      return null;
+    }
+  };
+
+  // エクスポート機能
+  const handleExport = () => {
+    const data = {
+      words: words,
+      board: board
+    };
+    
+    const compressed = compressData(data);
+    const baseUrl = window.location.origin + window.location.pathname;
+    const url = `${baseUrl}?data=${compressed}`;
+    setExportUrl(url);
+    setShowExportModal(true);
+  };
+
+  // クリップボードにコピー
+  const handleCopyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(exportUrl);
+      alert('URLをクリップボードにコピーしました！');
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+      alert('コピーに失敗しました。URLを手動でコピーしてください。');
+    }
+  };
 
   // サンプル挿入用
   const handleSample = () => {
@@ -475,6 +594,46 @@ export default function SkeletonPage() {
         </div>
       )}
 
+      {/* エクスポートモーダル */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded shadow-lg p-6 max-w-2xl w-full relative">
+            <button
+              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
+              onClick={() => setShowExportModal(false)}
+            >閉じる</button>
+            <h3 className="text-xl font-bold mb-4">エクスポート</h3>
+            <p className="mb-4 text-sm text-gray-600">
+              以下のURLを共有することで、現在の盤面と単語の状態を他の人と共有できます。
+            </p>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                共有URL:
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={exportUrl}
+                  readOnly
+                  className="flex-1 p-2 border rounded bg-gray-50 text-sm"
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                />
+                <button
+                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                  onClick={handleCopyToClipboard}
+                >
+                  コピー
+                </button>
+              </div>
+            </div>
+            <div className="text-sm text-gray-500">
+              <p>※ URLには盤面の配置と入力された単語が含まれています</p>
+              <p>※ 解析結果は含まれませんので、共有先で再度解析を実行してください</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <h2 className="text-2xl font-bold mb-4">スケルトンソルバー</h2>
       
       <div className="mb-4">
@@ -496,6 +655,10 @@ export default function SkeletonPage() {
           className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
           onClick={handleAnalyze}
         >解析</button>
+        <button
+          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+          onClick={handleExport}
+        >エクスポート</button>
       </div>
 
       <div className="mb-4">
