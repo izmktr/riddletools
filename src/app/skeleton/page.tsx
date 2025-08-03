@@ -50,6 +50,12 @@ export default function SkeletonPage() {
   const [solvedGrid, setSolvedGrid] = useState<string[][] | null>(null);
   const [exportUrl, setExportUrl] = useState<string>("");
   const [showExportModal, setShowExportModal] = useState(false);
+  const [wordStats, setWordStats] = useState<{
+    inputTotal: number;
+    inputByLength: Map<number, number>;
+    boardTotal: number;
+    boardByLength: Map<number, number>;
+  } | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
 
   // データ解凍関数
@@ -275,6 +281,7 @@ export default function SkeletonPage() {
     // 解析結果もクリア
     setUnusedWords([]);
     setSolvedGrid(null);
+    setWordStats(null);
     setShowManual(false);
   };
 
@@ -284,6 +291,7 @@ export default function SkeletonPage() {
     setBoard(Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill("white")));
     setUnusedWords([]);
     setSolvedGrid(null);
+    setWordStats(null);
   };
 
   // マスのクリック
@@ -390,10 +398,34 @@ export default function SkeletonPage() {
     return intersections;
   };
 
+  // 単語統計を計算
+  const calculateWordStats = (inputWords: string[], slots: Slot[]) => {
+    const inputByLength = new Map<number, number>();
+    const boardByLength = new Map<number, number>();
+
+    // 入力単語の統計
+    inputWords.forEach(word => {
+      const length = word.length;
+      inputByLength.set(length, (inputByLength.get(length) || 0) + 1);
+    });
+
+    // ボードのスロット統計
+    slots.forEach(slot => {
+      const length = slot.length;
+      boardByLength.set(length, (boardByLength.get(length) || 0) + 1);
+    });
+
+    return {
+      inputTotal: inputWords.length,
+      inputByLength,
+      boardTotal: slots.length,
+      boardByLength
+    };
+  };
 
   // 高度な解析実行
   const handleAnalyze = () => {
-    const wordList = words.split(/\r?\n/).map(w => w.trim()).filter(Boolean);
+    const wordList = words.split(/\r?\n/).map((w: string) => w.trim()).filter(Boolean);
     const slots = getConsecutiveCells();
     
     // バックトラッキングによる制約解法
@@ -401,21 +433,28 @@ export default function SkeletonPage() {
     
     if (result) {
       // 使われなかった単語
-      const unused = wordList.filter(w => !result.usedWords.has(w));
+      const unused = wordList.filter((w: string) => !result.usedWords.has(w));
       setUnusedWords(unused);
       
       // 解析結果をボードに表示
       setSolvedGrid(result.grid);
+      
+      // 統計情報を計算
+      setWordStats(calculateWordStats(wordList, slots));
     } else {
       // 完全解が見つからない場合でも部分解を試す
       const partialResult = solvePartial(wordList, slots);
       if (partialResult) {
-        const unused = wordList.filter(w => !partialResult.usedWords.has(w));
+        const unused = wordList.filter((w: string) => !partialResult.usedWords.has(w));
         setUnusedWords([...unused, "（部分解析結果）"]);
         setSolvedGrid(partialResult.grid);
+        
+        // 統計情報を計算
+        setWordStats(calculateWordStats(wordList, slots));
       } else {
         setUnusedWords(["解が見つかりませんでした"]);
         setSolvedGrid(null);
+        setWordStats(null);
       }
     }
   };
@@ -516,25 +555,22 @@ export default function SkeletonPage() {
     // 両方とも確定済みなら何もしない
     if (intersection.verticalSlots.confirmedWord && intersection.horizontalSlots.confirmedWord) return;
 
-    const letters = new Set<string>();
     //　縦のスロットに入りうる文字の一覧
-    const verticalLetters = intersection.verticalSlots.confirmedWord ?
-      [intersection.verticalSlots.confirmedWord[intersection.verticalLetterPosition]] :
-      intersection.verticalSlots.candidates.filter(c => c[intersection.verticalLetterPosition]);
+    const verticalLetters = new Set<string>(
+      intersection.verticalSlots.confirmedWord ?
+        [intersection.verticalSlots.confirmedWord[intersection.verticalLetterPosition]] :
+        intersection.verticalSlots.candidates.map(c => c[intersection.verticalLetterPosition])
+    );
 
     // 横のスロットに入りうる文字の一覧
-    const horizontalLetters = intersection.horizontalSlots.confirmedWord ?
-      [intersection.horizontalSlots.confirmedWord[intersection.horizontalLetterPosition]] :
-      intersection.horizontalSlots.candidates.filter(c => c[intersection.horizontalLetterPosition]);
+    const horizontalLetters = new Set<string>(
+      intersection.horizontalSlots.confirmedWord ?
+        [intersection.horizontalSlots.confirmedWord[intersection.horizontalLetterPosition]] :
+        intersection.horizontalSlots.candidates.map(c => c[intersection.horizontalLetterPosition])
+    );
 
     // 交差点の文字を抽出
-    for (const vLetter of verticalLetters) {
-      for (const hLetter of horizontalLetters) {
-        if (vLetter[intersection.verticalLetterPosition] === hLetter[intersection.horizontalLetterPosition] && vLetter !== hLetter) {
-          letters.add(vLetter[intersection.verticalLetterPosition]);
-        }
-      }
-    }
+    const letters = new Set([...verticalLetters].filter(letter => horizontalLetters.has(letter)));
 
     // まだ未確定なら情報を絞る
     if (!intersection.verticalSlots.confirmedWord){
@@ -781,6 +817,39 @@ export default function SkeletonPage() {
           ))}
         </div>
       </div>
+
+      {/* 統計情報表示 */}
+      {wordStats && (
+        <div className="mb-4 p-4 border rounded bg-blue-50">
+          <h3 className="font-semibold mb-2">単語統計</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <h4 className="font-medium text-sm mb-1">入力単語 (総数: {wordStats.inputTotal}個)</h4>
+              <div className="text-sm">
+                {Array.from(wordStats.inputByLength.entries())
+                  .sort(([a], [b]) => a - b)
+                  .map(([length, count]) => (
+                    <span key={length} className="inline-block mr-3">
+                      {length}文字: {count}個
+                    </span>
+                  ))}
+              </div>
+            </div>
+            <div>
+              <h4 className="font-medium text-sm mb-1">ボードのマス (総数: {wordStats.boardTotal}個)</h4>
+              <div className="text-sm">
+                {Array.from(wordStats.boardByLength.entries())
+                  .sort(([a], [b]) => a - b)
+                  .map(([length, count]) => (
+                    <span key={length} className="inline-block mr-3">
+                      {length}文字: {count}個
+                    </span>
+                  ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {unusedWords.length > 0 && (
         <div>
