@@ -570,7 +570,7 @@ export default function SkeletonPage() {
     );
 
     // 交差点の文字を抽出
-    const letters = new Set([...verticalLetters].filter(letter => horizontalLetters.has(letter)));
+    const letters = verticalLetters.intersection(horizontalLetters);
 
     // まだ未確定なら情報を絞る
     if (!intersection.verticalSlots.confirmedWord){
