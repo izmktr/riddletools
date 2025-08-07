@@ -38,21 +38,6 @@ export default function CryptarithmeticPage() {
     }
   };
 
-  // 順列を生成する関数
-  const generatePermutations = (arr: number[]): number[][] => {
-    if (arr.length <= 1) return [arr];
-    
-    const result: number[][] = [];
-    for (let i = 0; i < arr.length; i++) {
-      const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
-      const perms = generatePermutations(rest);
-      for (const perm of perms) {
-        result.push([arr[i], ...perm]);
-      }
-    }
-    return result;
-  };
-
   // 覆面算を解く関数
   const solveCryptarithmetic = (equations: string[]): string[] => {
     const results: string[] = [];
@@ -108,59 +93,16 @@ export default function CryptarithmeticPage() {
       });
     }
 
-    // 組み合わせを生成する関数
-    const getCombinations = (arr: number[], size: number): number[][] => {
-      if (size === 0) return [[]];
-      if (arr.length === 0 || size > arr.length) return [];
-      
-      const result: number[][] = [];
-      const [first, ...rest] = arr;
-      
-      // 最初の要素を含む組み合わせ
-      getCombinations(rest, size - 1).forEach(combo => {
-        result.push([first, ...combo]);
-      });
-      
-      // 最初の要素を含まない組み合わせ
-      getCombinations(rest, size).forEach(combo => {
-        result.push(combo);
-      });
-      
-      return result;
-    };
-
-    // 利用可能な数字の組み合わせを生成
-    const availableDigits = Array.from({ length: 10 }, (_, i) => i);
-    const combinations = getCombinations(availableDigits, uniqueChars.length);
-    
     let solutionCount = 0;
     const maxSolutions = 10; // 解の数を制限
 
-    for (const combination of combinations) {
-      if (solutionCount >= maxSolutions) break;
-      
-      const permutations = generatePermutations(combination);
-      
-      for (const perm of permutations) {
-        if (solutionCount >= maxSolutions) break;
-        
-        // 文字と数字のマッピングを作成
-        const mapping = new Map<string, number>();
-        for (let i = 0; i < uniqueChars.length; i++) {
-          mapping.set(uniqueChars[i], perm[i]);
-        }
+    const solver = (charIndex: number, mapping: Map<string, number>, usedDigits: Set<number>) => {
+      if (solutionCount >= maxSolutions) {
+        return;
+      }
 
-        // 先頭文字が0でないかチェック
-        let validLeading = true;
-        for (const char of leadingChars) {
-          if (mapping.get(char) === 0) {
-            validLeading = false;
-            break;
-          }
-        }
-
-        if (!validLeading) continue;
-
+      // ベースケース: すべての文字に数字が割り当てられた
+      if (charIndex === uniqueChars.length) {
         // すべての等式をチェック
         let allEquationsValid = true;
         const equationResults: string[] = [];
@@ -180,12 +122,7 @@ export default function CryptarithmeticPage() {
           const leftValue = safeEvaluate(leftExpr);
           const rightValue = safeEvaluate(rightExpr);
 
-          if (leftValue === null || rightValue === null) {
-            allEquationsValid = false;
-            break;
-          }
-
-          if (leftValue !== rightValue) {
+          if (leftValue === null || rightValue === null || leftValue !== rightValue) {
             allEquationsValid = false;
             break;
           }
@@ -195,19 +132,47 @@ export default function CryptarithmeticPage() {
 
         if (allEquationsValid) {
           solutionCount++;
-          
+
           // マッピングを文字列として表示
           const mappingStr = uniqueChars
             .map(char => `${char}=${mapping.get(char)}`)
             .join(', ');
-          
+
           results.push(`解 ${solutionCount}:`);
           results.push(`  ${mappingStr}`);
           equationResults.forEach(eq => results.push(`  ${eq}`));
           results.push('');
         }
+        return;
       }
-    }
+
+      // 再帰ステップ
+      const currentChar = uniqueChars[charIndex];
+      const isLeading = leadingChars.has(currentChar);
+
+      for (let digit = 0; digit <= 9; digit++) {
+        // 制約チェック
+        if (usedDigits.has(digit)) continue; // この数字は使用済み
+        if (isLeading && digit === 0) continue; // 先頭文字は0にできない
+
+        // 割り当て
+        mapping.set(currentChar, digit);
+        usedDigits.add(digit);
+
+        // 次の文字へ
+        solver(charIndex + 1, mapping, usedDigits);
+
+        // バックトラック
+        mapping.delete(currentChar);
+        usedDigits.delete(digit);
+
+        // 解が上限に達したら探索を打ち切る
+        if (solutionCount >= maxSolutions) return;
+      }
+    };
+
+    // バックトラッキング探索を開始
+    solver(0, new Map<string, number>(), new Set<number>());
 
     if (solutionCount === 0) {
       results.push('解が見つかりませんでした');

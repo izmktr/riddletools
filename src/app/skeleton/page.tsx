@@ -428,9 +428,15 @@ export default function SkeletonPage() {
     const wordList = words.split(/\r?\n/).map((w: string) => w.trim()).filter(Boolean);
     const slots = getConsecutiveCells();
     
-    // バックトラッキングによる制約解法
-    const result = solveConstraints(wordList, slots);
-    
+    // 文字数別に単語を分ける
+    const lengthMap = createLengthMap(wordList);
+
+    // 交差点を事前計算
+    const intersections = findIntersections(slots);
+
+    // 制約解法
+    const result = solveConstraints(lengthMap, slots, intersections);
+
     if (result) {
       // 使われなかった単語
       const unused = wordList.filter((w: string) => !result.usedWords.has(w));
@@ -589,23 +595,24 @@ export default function SkeletonPage() {
 
   }
 
-  // 各スロットに確定した文字を探して入れていく
-  const solveConstraints = (wordList: string[], slots: Slot[]): { grid: string[][], usedWords: Set<string> } | null => {
-    const grid: string[][] = Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill(""));
-
-    // 交差点を事前計算
-    const intersections = findIntersections(slots);
-
-    // 文字数別に単語を分ける
+  const createLengthMap = (wordList: string[]) => {
     const lengthMap = new Map<number, string[]>();
     for (const word of wordList) {
       const length = word.length;
       if (!lengthMap.has(length)) {
         lengthMap.set(length, [word]);
-      }else{
+      } else {
         lengthMap.get(length)!.push(word);
       }
     }
+    return lengthMap;
+  }
+
+
+  // 各スロットに確定した文字を探して入れていく
+  const solveConstraints = (lengthMap: Map<number, string[]>, slots: Slot[], intersections: Intersection[]):
+   { grid: string[][], usedWords: Set<string> } | null => {
+    const grid: string[][] = Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill(""));
 
     // 各スロットに候補を設定
     for (const slot of slots) {
@@ -661,6 +668,7 @@ export default function SkeletonPage() {
     }
 
     return { grid, usedWords };
+
   };
 
   // 単語を配置
@@ -675,16 +683,8 @@ export default function SkeletonPage() {
   const countConstraints = (slot: Slot, intersections: Intersection[]): number => {
     let count = 0;
     for (const intersection of intersections) {
-      // このスロットが交差点に関わっているかチェック
-      const hasIntersection = slot.positions.some(pos => 
-        (intersection.horizontalSlots === slot && 
-         pos.row === intersection.verticalSlots.positions[intersection.verticalLetterPosition].row &&
-         pos.col === intersection.verticalSlots.positions[intersection.verticalLetterPosition].col) ||
-        (intersection.verticalSlots === slot && 
-         pos.row === intersection.horizontalSlots.positions[intersection.horizontalLetterPosition].row &&
-         pos.col === intersection.horizontalSlots.positions[intersection.horizontalLetterPosition].col)
-      );
-      if (hasIntersection) {
+      // このスロットが交差点のペアに含まれているかを直接チェックする
+      if (intersection.horizontalSlots === slot || intersection.verticalSlots === slot) {
         count++;
       }
     }
