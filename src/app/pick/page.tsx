@@ -224,7 +224,14 @@ export default function PickPage() {
               for (let i = 0; i < rightLine.length; i++) {
                 const char = rightLine[i];
                 if (char !== ' ' && char !== '　') {
-                  rightChars.push(char);
+                  if(/[0-9]/.test(char) && i + 1 < rightLine.length && /[0-9]/.test(rightLine[i + 1])) {
+                    rightChars.push(char + rightLine[i + 1]);
+                    i++; // 次の文字もスキップ
+                  }else if (/[0-9A-Za-z]/.test(char)) {
+                    rightChars.push(char);
+                  }else{
+                    rightChars.push('');
+                  }
                 }
               }
               
@@ -238,10 +245,10 @@ export default function PickPage() {
                 
                 cells.push(
                   <div key={`${lineIndex}-${charIndex}`} className="relative w-12 h-12 border border-gray-300 flex items-center justify-center bg-green-50">
-                    {leftChar && valueToKeyMap[leftChar] && (
-                      <span className="absolute top-0 left-1 text-[10px] text-gray-400 select-none">{valueToKeyMap[leftChar]}</span>
+                    {leftChar && rightChar && (
+                      <span className="absolute top-0 left-1 text-[10px] text-gray-400 select-none">{rightChar}</span>
                     )}
-                    {!leftChar && rightChar && /[A-Za-z0-9]/.test(rightChar) && (
+                    {!leftChar && rightChar && (
                       <span className="absolute top-0 left-1 text-[10px] text-red-400 select-none">{rightChar}</span>
                     )}
                     <span className="text-xl font-bold">{leftChar || ''}</span>
