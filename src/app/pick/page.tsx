@@ -32,7 +32,7 @@ export default function PickPage() {
       const c = normalizedTitle[i];
       if (/[A-Za-z0-9]/.test(c)) {
         if (/[0-9]/.test(c) && useTwoDigits && i + 1 < normalizedTitle.length && /[0-9]/.test(normalizedTitle[i + 1])) {
-          const key = normalizedTitle.slice(i, i + 2);
+          const key = c == '0' ? normalizedTitle[i + 1] : normalizedTitle.slice(i, i + 2);
           customKeys.push(key);
           i += 2;
         } else {
@@ -68,7 +68,11 @@ export default function PickPage() {
       } else if (/[0-9]/.test(char)) {
         if (useTwoDigits && i + 1 < rLine.length && /[0-9]/.test(rLine[i + 1])) {
           // 次の文字が数字で、間に空白がない場合のみ2桁として扱う
-          key = rLine.slice(i, i + 2);
+          if (char === '0') {
+            key = rLine[i + 1]; // 0で始まる場合は1桁の数値として処理
+          }else{
+            key = rLine.slice(i, i + 2);
+          }
           consumed = 2;
         } else {
           key = char;
@@ -224,8 +228,13 @@ export default function PickPage() {
               for (let i = 0; i < rightLine.length; i++) {
                 const char = rightLine[i];
                 if (char !== ' ' && char !== '　') {
-                  if(/[0-9]/.test(char) && i + 1 < rightLine.length && /[0-9]/.test(rightLine[i + 1])) {
-                    rightChars.push(char + rightLine[i + 1]);
+                  if(useTwoDigits && /[0-9]/.test(char) && i + 1 < rightLine.length && /[0-9]/.test(rightLine[i + 1])) {
+                    // 0で始まる場合は１桁の数値として処理
+                    if (char === '0'){
+                      rightChars.push(rightLine[i + 1]);
+                    }else{
+                      rightChars.push(char + rightLine[i + 1]);
+                    }
                     i++; // 次の文字もスキップ
                   }else if (/[0-9A-Za-z]/.test(char)) {
                     rightChars.push(char);
@@ -242,9 +251,17 @@ export default function PickPage() {
               for (let charIndex = 0; charIndex < maxCharsInLine; charIndex++) {
                 const leftChar = leftChars[charIndex] || '';
                 const rightChar = rightChars[charIndex] || '';
+                const isLeftFit = charIndex < rightChars.length;
                 
                 cells.push(
-                  <div key={`${lineIndex}-${charIndex}`} className="relative w-12 h-12 border border-gray-300 flex items-center justify-center bg-green-50">
+                    <div
+                    key={`${lineIndex}-${charIndex}`}
+                    className={`relative w-12 h-12 border flex items-center justify-center ${
+                      isLeftFit
+                      ? "border-gray-300 bg-green-50"
+                      : "border-transparent bg-transparent"
+                    }`}
+                    >
                     {leftChar && rightChar && (
                       <span className="absolute top-0 left-1 text-[10px] text-gray-400 select-none">{rightChar}</span>
                     )}
