@@ -400,9 +400,9 @@ export default function BraillePage() {
           <h2 className="font-bold text-blue-800 mb-2">使い方:</h2>
           <ul className="text-blue-700 space-y-1">
             <li><strong>文字→点字:</strong> ひらがな、カタカナ、英文字を入力</li>
-            <li className="ml-4">例: "あいう" → 点字と2桁数字で表示</li>
+            <li className="ml-4">例: &quot;あいう&quot; → 点字と2桁数字で表示</li>
             <li><strong>数字→文字:</strong> 2桁の数字をスペースで区切って入力</li>
-            <li className="ml-4">例: "10 51 61" → 対応する文字を表示</li>
+            <li className="ml-4">例: &quot;10 51 61&quot; → 対応する文字を表示</li>
           </ul>
         </div>
 
@@ -413,7 +413,7 @@ export default function BraillePage() {
             各列を3ビットの2進数として扱い、10進数に変換して2桁の数字で表現します。
           </p>
           <div className="mt-2 text-yellow-700 text-sm">
-            例: ⠁ (あ) = 左列:100(4) 右列:000(0) → "40"
+            例: ⠁ (あ) = 左列:100(4) 右列:000(0) → &quot;40&quot;
           </div>
         </div>
         
