@@ -74,7 +74,7 @@ describe('SkeletonPage UI Tests', () => {
     
     // サンプルデータが設定されることを確認
     const textarea = screen.getByPlaceholderText('単語を改行で区切って入力してください');
-    expect(textarea).toHaveValue('りんご\nみかん\nばなな\nいちご\nぶどう');
+    expect(textarea).toHaveValue('かんでんち\nでんわせん\nわしんとん\nかしわ\nわだい');
   });
 
   test('リセットボタンが動作する', () => {
