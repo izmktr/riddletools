@@ -35,6 +35,11 @@ export default function Home() {
                 点字変換ツール
               </Link>
             </li>
+            <li>
+              <Link href="/morse" className="block bg-gradient-to-r from-violet-200 to-violet-300 hover:from-violet-300 hover:to-violet-400 text-violet-800 font-semibold rounded-lg px-6 py-4 shadow-lg transform hover:scale-105 transition-all duration-200">
+                モールス信号変換ツール
+              </Link>
+            </li>
           </ul>
         </div>
 
