@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "next": "15.4.3",
+    "pako": "^2.1.0",
     "react": "19.1.0",
     "react-dom": "19.1.0"
   },
@@ -23,10 +24,11 @@
     "@babel/preset-typescript": "^7.27.1",
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
-    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/jest-dom": "^6.6.4",
     "@testing-library/react": "^16.3.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^20",
+    "@types/pako": "^2.0.3",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-jest": "^30.0.5",
@@ -36,6 +38,7 @@
     "jest-environment-jsdom": "^30.0.5",
     "tailwindcss": "^4",
     "ts-jest": "^29.4.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5"
   }
 }
