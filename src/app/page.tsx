@@ -16,6 +16,7 @@ export default function Home() {
   const Solver = [
     ["しりとりソルバー", "/shiritori"],
     ["スケルトンソルバー", "/skeleton"],
+    ["数独ソルバー", "/sudoku"],
     ["覆面算ソルバー", "/cryptarithmetic"],
   ];
 
