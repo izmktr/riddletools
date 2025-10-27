@@ -16,6 +16,7 @@ export default function Home() {
   const Solver = [
     ["しりとりソルバー", "/shiritori"],
     ["スケルトンソルバー", "/skeleton"],
+    ["中国剰余定理", "/chinese-remainder"],
     ["覆面算ソルバー", "/cryptarithmetic"],
   ];
 
