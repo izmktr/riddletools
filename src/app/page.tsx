@@ -7,6 +7,8 @@ export default function Home() {
     ["文字数カウントツール", "/count"],
     ["文字比較ツール", "/compare"],
     ["文字拾いツール", "/pick"],
+    ["数字文字変換ツール", "/number-convert"],
+    ["QWERTY⇔かな変換ツール", "/qwerty"],
     ["元素記号変換ツール", "/elements"],
     ["点字変換ツール", "/braille"],
     ["モールス信号変換ツール", "/morse"],
@@ -15,6 +17,7 @@ export default function Home() {
   const Solver = [
     ["しりとりソルバー", "/shiritori"],
     ["スケルトンソルバー", "/skeleton"],
+    ["中国剰余定理", "/chinese-remainder"],
     ["覆面算ソルバー", "/cryptarithmetic"],
   ];
 
