@@ -10,6 +10,7 @@ export default function Home() {
     ["元素記号変換ツール", "/elements"],
     ["点字変換ツール", "/braille"],
     ["モールス信号変換ツール", "/morse"],
+    ["魚の骨ツール", "/sakananohone"],
   ];
   const Solver = [
     ["しりとりソルバー", "/shiritori"],
