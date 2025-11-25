@@ -5,9 +5,17 @@ import Link from 'next/link';
 
 type CellValue = string | null;
 type SudokuBoard = CellValue[][];
+type PossibleNumbers = Set<number>;
+type PossibleBoard = (PossibleNumbers | null)[][];
 
 export default function SudokuSolver() {
   const [board, setBoard] = useState<SudokuBoard>(() => 
+    Array(9).fill(null).map(() => Array(9).fill(null))
+  );
+  const [possibleNumbers, setPossibleNumbers] = useState<PossibleBoard>(() => 
+    Array(9).fill(null).map(() => Array(9).fill(null))
+  );
+  const [initialBoard, setInitialBoard] = useState<SudokuBoard>(() => 
     Array(9).fill(null).map(() => Array(9).fill(null))
   );
   const [selectedCell, setSelectedCell] = useState<{row: number, col: number} | null>(null);
@@ -48,7 +56,18 @@ export default function SudokuSolver() {
       })
     );
     
+    // 使用可能数字をクリア
+    const newPossible = possibleNumbers.map((row, rowIndex) =>
+      row.map((cell, colIndex) => {
+        if (rowIndex === selectedCell.row && colIndex === selectedCell.col) {
+          return null;
+        }
+        return cell;
+      })
+    );
+    
     setBoard(newBoard);
+    setPossibleNumbers(newPossible);
     saveToStorage(newBoard);
   };
 
@@ -77,32 +96,296 @@ export default function SudokuSolver() {
   const handleReset = () => {
     const emptyBoard = Array(9).fill(null).map(() => Array(9).fill(null));
     setBoard(emptyBoard);
+    setPossibleNumbers(Array(9).fill(null).map(() => Array(9).fill(null)));
+    setInitialBoard(Array(9).fill(null).map(() => Array(9).fill(null)));
     saveToStorage(emptyBoard);
     setSelectedCell(null);
   };
 
-  // 解析（仮データを入力）
-  const handleAnalyze = () => {
-    const newBoard = board.map((row, rowIndex) =>
-      row.map((cell, colIndex) => {
-        if (cell === null) {
-          // 左上から詰めて1-9を入力
-          const cellNumber = rowIndex * 9 + colIndex + 1;
-          return ((cellNumber - 1) % 9 + 1).toString();
-        }
-        return cell;
-      })
+  // サンプル問題を読み込み
+  const handleLoadSample = () => {
+    const sampleData = [
+      '53..7....',
+      '6..195...',
+      '.98....6.',
+      '8...6...3',
+      '4..8.3..1',
+      '7...2...6',
+      '.6....28.',
+      '...419..5',
+      '....8..79'
+    ];
+    
+    const sampleBoard: SudokuBoard = sampleData.map(row => 
+      row.split('').map(char => char === '.' ? null : char)
     );
     
-    setBoard(newBoard);
-    saveToStorage(newBoard);
+    setBoard(sampleBoard);
+    setPossibleNumbers(Array(9).fill(null).map(() => Array(9).fill(null)));
+    setInitialBoard(Array(9).fill(null).map(() => Array(9).fill(null)));
+    saveToStorage(sampleBoard);
+    setSelectedCell(null);
+  };
+
+  // ブロック番号を取得（0-8）
+  const getBlockIndex = (row: number, col: number): number => {
+    return Math.floor(row / 3) * 3 + Math.floor(col / 3);
+  };
+
+  // 同じブロック内のセル座標を取得
+  const getBlockCells = (blockIndex: number): Array<{row: number, col: number}> => {
+    const cells: Array<{row: number, col: number}> = [];
+    const startRow = Math.floor(blockIndex / 3) * 3;
+    const startCol = (blockIndex % 3) * 3;
+    for (let r = startRow; r < startRow + 3; r++) {
+      for (let c = startCol; c < startCol + 3; c++) {
+        cells.push({row: r, col: c});
+      }
+    }
+    return cells;
+  };
+
+  // 使用可能数字を初期化
+  const initializePossibleNumbers = (currentBoard: SudokuBoard): PossibleBoard => {
+    const possible: PossibleBoard = Array(9).fill(null).map(() => Array(9).fill(null));
+    
+    for (let row = 0; row < 9; row++) {
+      for (let col = 0; col < 9; col++) {
+        if (currentBoard[row][col] === null) {
+          possible[row][col] = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        }
+      }
+    }
+    
+    return possible;
+  };
+
+  // 確定数字から使用可能数字を削除
+  const eliminateByHints = (currentBoard: SudokuBoard, possible: PossibleBoard): void => {
+    for (let row = 0; row < 9; row++) {
+      for (let col = 0; col < 9; col++) {
+        const value = currentBoard[row][col];
+        if (value !== null) {
+          const num = parseInt(value);
+          
+          // 同じ行の空白マスから削除
+          for (let c = 0; c < 9; c++) {
+            if (possible[row][c]) {
+              possible[row][c]!.delete(num);
+            }
+          }
+          
+          // 同じ列の空白マスから削除
+          for (let r = 0; r < 9; r++) {
+            if (possible[r][col]) {
+              possible[r][col]!.delete(num);
+            }
+          }
+          
+          // 同じブロックの空白マスから削除
+          const blockCells = getBlockCells(getBlockIndex(row, col));
+          for (const cell of blockCells) {
+            if (possible[cell.row][cell.col]) {
+              possible[cell.row][cell.col]!.delete(num);
+            }
+          }
+        }
+      }
+    }
+  };
+
+  // 使用可能数字が1個のマスを確定
+  const findSinglePossible = (currentBoard: SudokuBoard, possible: PossibleBoard): boolean => {
+    let changed = false;
+    
+    for (let row = 0; row < 9; row++) {
+      for (let col = 0; col < 9; col++) {
+        if (currentBoard[row][col] === null && possible[row][col] && possible[row][col]!.size === 1) {
+          const num = Array.from(possible[row][col]!)[0];
+          currentBoard[row][col] = num.toString();
+          possible[row][col] = null;
+          changed = true;
+        }
+      }
+    }
+    
+    return changed;
+  };
+
+  // 行/列/ブロック内で唯一の候補となる数字を確定
+  const findUniqueCandidate = (currentBoard: SudokuBoard, possible: PossibleBoard): boolean => {
+    let changed = false;
+    const toConfirm: Array<{row: number, col: number, num: number}> = [];
+    
+    // 各行をチェック
+    for (let row = 0; row < 9; row++) {
+      for (let num = 1; num <= 9; num++) {
+        // この行で既にnumが確定しているかチェック
+        let alreadyPlaced = false;
+        for (let c = 0; c < 9; c++) {
+          if (currentBoard[row][c] === num.toString()) {
+            alreadyPlaced = true;
+            break;
+          }
+        }
+        if (alreadyPlaced) continue;
+        
+        const candidates: number[] = [];
+        for (let col = 0; col < 9; col++) {
+          if (possible[row][col]?.has(num)) {
+            candidates.push(col);
+          }
+        }
+        if (candidates.length === 1) {
+          const col = candidates[0];
+          if (currentBoard[row][col] === null) {
+            toConfirm.push({row, col, num});
+          }
+        }
+      }
+    }
+    
+    // 各列をチェック
+    for (let col = 0; col < 9; col++) {
+      for (let num = 1; num <= 9; num++) {
+        // この列で既にnumが確定しているかチェック
+        let alreadyPlaced = false;
+        for (let r = 0; r < 9; r++) {
+          if (currentBoard[r][col] === num.toString()) {
+            alreadyPlaced = true;
+            break;
+          }
+        }
+        if (alreadyPlaced) continue;
+        
+        const candidates: number[] = [];
+        for (let row = 0; row < 9; row++) {
+          if (possible[row][col]?.has(num)) {
+            candidates.push(row);
+          }
+        }
+        if (candidates.length === 1) {
+          const row = candidates[0];
+          if (currentBoard[row][col] === null) {
+            toConfirm.push({row, col, num});
+          }
+        }
+      }
+    }
+    
+    // 各ブロックをチェック
+    for (let blockIndex = 0; blockIndex < 9; blockIndex++) {
+      const cells = getBlockCells(blockIndex);
+      for (let num = 1; num <= 9; num++) {
+        // このブロックで既にnumが確定しているかチェック
+        let alreadyPlaced = false;
+        for (const cell of cells) {
+          if (currentBoard[cell.row][cell.col] === num.toString()) {
+            alreadyPlaced = true;
+            break;
+          }
+        }
+        if (alreadyPlaced) continue;
+        
+        const candidates: Array<{row: number, col: number}> = [];
+        for (const cell of cells) {
+          if (possible[cell.row][cell.col]?.has(num)) {
+            candidates.push(cell);
+          }
+        }
+        if (candidates.length === 1) {
+          const {row, col} = candidates[0];
+          if (currentBoard[row][col] === null) {
+            toConfirm.push({row, col, num});
+          }
+        }
+      }
+    }
+    
+    // 確定処理（重複チェック付き）
+    for (const {row, col, num} of toConfirm) {
+      if (currentBoard[row][col] === null) {
+        currentBoard[row][col] = num.toString();
+        possible[row][col] = null;
+        changed = true;
+      }
+    }
+    
+    return changed;
+  };
+
+  // 解析実行
+  const handleAnalyze = () => {
+    // 現在の盤面をコピー
+    const currentBoard: SudokuBoard = board.map(row => [...row]);
+    
+    // 初期盤面を保存（解析前の状態）
+    setInitialBoard(board.map(row => [...row]));
+    
+    // 使用可能数字を初期化
+    let possible = initializePossibleNumbers(currentBoard);
+    
+    let iterations = 0;
+    const maxIterations = 100;
+    
+    while (iterations < maxIterations) {
+      iterations++;
+      
+      // ヒントから使用可能数字を削除
+      eliminateByHints(currentBoard, possible);
+      
+      // 変更があったかフラグ
+      let changed = false;
+      
+      // 使用可能数字が1個のマスを確定
+      const singleChanged = findSinglePossible(currentBoard, possible);
+      if (singleChanged) {
+        changed = true;
+        // 確定した数字の影響を即座に反映
+        eliminateByHints(currentBoard, possible);
+      }
+      
+      // 唯一の候補を確定
+      const uniqueChanged = findUniqueCandidate(currentBoard, possible);
+      if (uniqueChanged) {
+        changed = true;
+        // 確定した数字の影響を即座に反映
+        eliminateByHints(currentBoard, possible);
+      }
+      
+      // 変更がなければ終了
+      if (!changed) {
+        break;
+      }
+    }
+    
+    setBoard(currentBoard);
+    setPossibleNumbers(possible);
+    saveToStorage(currentBoard);
   };
 
   // セルのスタイルを取得
   const getCellStyle = (row: number, col: number) => {
-    const baseStyle = 'w-12 h-12 border border-gray-400 flex items-center justify-center cursor-pointer text-lg font-medium';
+    const hasPossible = possibleNumbers[row][col] !== null;
+    const isInitial = initialBoard[row][col] !== null;
+    const isFilled = board[row][col] !== null;
+    
+    const baseStyle = hasPossible 
+      ? 'w-12 h-12 border border-gray-400 flex items-center justify-center cursor-pointer text-[6px] font-medium p-0.5'
+      : 'w-12 h-12 border border-gray-400 flex items-center justify-center cursor-pointer text-lg font-medium';
     const selectedStyle = selectedCell?.row === row && selectedCell?.col === col ? ' bg-blue-200' : '';
-    const filledStyle = board[row][col] ? ' bg-yellow-100' : ' bg-white hover:bg-gray-100';
+    
+    // 色分け: 初期マス=黄、解析マス=青、未確定=緑、空白=白
+    let filledStyle = '';
+    if (isFilled && isInitial) {
+      filledStyle = ' bg-yellow-100'; // 初期ヒント
+    } else if (isFilled) {
+      filledStyle = ' bg-blue-100'; // 解析で確定
+    } else if (hasPossible) {
+      filledStyle = ' bg-green-50'; // 未確定
+    } else {
+      filledStyle = ' bg-white hover:bg-gray-100'; // 空白
+    }
     
     // 境界線のスタイル
     let borderStyle = '';
@@ -147,7 +430,7 @@ export default function SudokuSolver() {
       <div className="flex flex-col xl:flex-row gap-8">
         {/* 数独盤面 */}
         <div className="flex-1 flex justify-center">
-          <div className="inline-block border-4 border-black">
+          <div className="inline-block">
             {board.map((row, rowIndex) => (
               <div key={rowIndex} className="flex">
                 {row.map((cell, colIndex) => (
@@ -156,7 +439,15 @@ export default function SudokuSolver() {
                     className={getCellStyle(rowIndex, colIndex)}
                     onClick={() => handleCellClick(rowIndex, colIndex)}
                   >
-                    {cell}
+                    {cell || (possibleNumbers[rowIndex][colIndex] ? (
+                      <div className="grid grid-cols-3 gap-0 w-full h-full text-[6px] leading-none">
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+                          <div key={num} className="flex items-center justify-center">
+                            {possibleNumbers[rowIndex][colIndex]!.has(num) ? num : ''}
+                          </div>
+                        ))}
+                      </div>
+                    ) : '')}
                   </div>
                 ))}
               </div>
@@ -205,6 +496,12 @@ export default function SudokuSolver() {
           {/* 操作ボタン */}
           <div className="space-y-3">
             <button
+              className="w-full px-4 py-3 bg-purple-500 text-white rounded hover:bg-purple-600 text-lg font-medium"
+              onClick={handleLoadSample}
+            >
+              サンプル問題
+            </button>
+            <button
               className="w-full px-4 py-3 bg-gray-500 text-white rounded hover:bg-gray-600 text-lg font-medium"
               onClick={handleReset}
             >
@@ -214,7 +511,7 @@ export default function SudokuSolver() {
               className="w-full px-4 py-3 bg-green-500 text-white rounded hover:bg-green-600 text-lg font-medium"
               onClick={handleAnalyze}
             >
-              解析（仮データ入力）
+              解析
             </button>
           </div>
 
@@ -222,10 +519,12 @@ export default function SudokuSolver() {
           <div className="mt-8 p-4 bg-blue-50 rounded">
             <h3 className="font-medium mb-3">操作方法</h3>
             <ul className="text-sm text-gray-700 space-y-2">
-              <li>• セルをクリックして選択（青色背景）</li>
+              <li>• セルをクリックして選択</li>
               <li>• ボタンまたはキーボードで数字を入力</li>
               <li>• 0キーまたはXで消去</li>
-              <li>• 数字入力されたセルは黄色背景</li>
+              <li>• <span className="inline-block w-4 h-4 bg-yellow-100 border border-gray-400 align-middle"></span> 初期ヒント（黄色）</li>
+              <li>• <span className="inline-block w-4 h-4 bg-blue-100 border border-gray-400 align-middle"></span> 解析で確定（青色）</li>
+              <li>• <span className="inline-block w-4 h-4 bg-green-50 border border-gray-400 align-middle"></span> 未確定マス（緑色、候補数字表示）</li>
               <li>• 太線は3×3ブロックの境界</li>
               <li>• データは自動保存されます</li>
             </ul>
