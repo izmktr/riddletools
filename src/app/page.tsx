@@ -12,12 +12,14 @@ export default function Home() {
     ["元素記号変換ツール", "/elements"],
     ["点字変換ツール", "/braille"],
     ["モールス信号変換ツール", "/morse"],
+    ["魚の骨ツール", "/sakananohone"],
   ];
   const Solver = [
     ["しりとりソルバー", "/shiritori"],
     ["スケルトンソルバー", "/skeleton"],
     ["数独ソルバー", "/sudoku"],
     ["覆面算ソルバー", "/cryptarithmetic"],
+    ["中国剰余定理", "/chinese-remainder"],
   ];
 
   // 色のグラデーション生成関数
