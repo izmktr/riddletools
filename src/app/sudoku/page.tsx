@@ -44,7 +44,7 @@ export default function SudokuSolver() {
   };
 
   // 数字ボタンをクリック
-  const handleNumberClick = (value: string | null) => {
+  const handleNumberClick = useCallback((value: string | null) => {
     if (!selectedCell) return;
     
     const newBoard = board.map((row, rowIndex) =>
@@ -69,7 +69,7 @@ export default function SudokuSolver() {
     setBoard(newBoard);
     setPossibleNumbers(newPossible);
     saveToStorage(newBoard);
-  };
+  }, [selectedCell, board, possibleNumbers, saveToStorage]);
 
   // キーボード入力
   useEffect(() => {
