@@ -8,6 +8,29 @@ export default function SakananohonePage() {
   const [showManual, setShowManual] = useState(false);
   const [result, setResult] = useState<string[][] | null>(null);
   const [highlightPositions, setHighlightPositions] = useState<Array<{row: number, col: number}>>([]);
+  const [isVertical, setIsVertical] = useState(false);
+  const [rowNumberType, setRowNumberType] = useState<"数字" | "ABC" | "あいう" | "いろは">("数字");
+
+  // 行番号を指定した文字種に変換する関数
+  const convertRowNumber = (index: number): string => {
+    const oneBasedIndex = index + 1;
+    
+    switch (rowNumberType) {
+      case "数字":
+        return oneBasedIndex.toString();
+      case "ABC":
+        const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        return alphabet[(oneBasedIndex - 1) % alphabet.length];
+      case "あいう":
+        const aiueo = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん";
+        return aiueo[(oneBasedIndex - 1) % aiueo.length];
+      case "いろは":
+        const iroha = "いろはにほへとちりぬるをわかよたれそつねならむうゐのおくやまけふこえてあさきゆめみしゑひも";
+        return iroha[(oneBasedIndex - 1) % iroha.length];
+      default:
+        return oneBasedIndex.toString();
+    }
+  };
 
   // 生成機能
   const handleGenerate = () => {
@@ -30,6 +53,15 @@ export default function SakananohonePage() {
       return;
     }
 
+    if (isVertical) {
+      generateVerticalTable(words, positionNumbers);
+    } else {
+      generateHorizontalTable(words, positionNumbers);
+    }
+  };
+
+  // 横書き（従来）の表生成
+  const generateHorizontalTable = (words: string[], positionNumbers: number[]) => {
     // 基準位置（読む位置の最大値）
     const basePosition = Math.max(...positionNumbers);
     
@@ -50,7 +82,7 @@ export default function SakananohonePage() {
       const startCol = basePosition - position;
       
       // 行番号を配置
-      table[rowIndex][startCol] = (rowIndex + 1).toString();
+      table[rowIndex][startCol] = convertRowNumber(rowIndex);
       
       // 単語を配置
       for (let i = 0; i < word.length; i++) {
@@ -67,12 +99,53 @@ export default function SakananohonePage() {
     setHighlightPositions(highlights);
   };
 
+  // 縦書きの表生成
+  const generateVerticalTable = (words: string[], positionNumbers: number[]) => {
+    // 基準位置（読む位置の最大値）
+    const basePosition = Math.max(...positionNumbers);
+    
+    // 単語最大長
+    const maxWordLength = Math.max(...words.map(w => w.length));
+    
+    // 表のサイズ（横と縦が転置）
+    const tableWidth = words.length;
+    const tableHeight = basePosition + maxWordLength;
+
+    // 表を初期化
+    const table: string[][] = Array(tableHeight).fill(null).map(() => Array(tableWidth).fill(''));
+    const highlights: Array<{row: number, col: number}> = [];
+
+    // 各列を処理（元の行が列になる）
+    words.forEach((word, colIndex) => {
+      const position = positionNumbers[colIndex];
+      const startRow = basePosition - position;
+      
+      // 列番号を配置
+      table[startRow][colIndex] = convertRowNumber(colIndex);
+      
+      // 単語を縦に配置
+      for (let i = 0; i < word.length; i++) {
+        table[startRow + 1 + i][colIndex] = word[i];
+      }
+      
+      // 読む位置に対応する文字をハイライト
+      if (startRow + position < tableHeight && table[startRow + position][colIndex]) {
+        highlights.push({row: startRow + position, col: colIndex});
+      }
+    });
+
+    setResult(table);
+    setHighlightPositions(highlights);
+  };
+
   // リセット機能
   const handleReset = () => {
     setWordList("");
     setPositionList("");
     setResult(null);
     setHighlightPositions([]);
+    setIsVertical(false);
+    setRowNumberType("数字");
   };
 
   // サンプル入力
@@ -86,14 +159,35 @@ export default function SakananohonePage() {
     return !table[row][col] || table[row][col] === '';
   };
 
+  // セルが行番号位置かどうかをチェック（位置ベース）
+  const isRowNumberPosition = (table: string[][], row: number, col: number): boolean => {
+    if (isCellEmpty(table, row, col)) return false;
+    
+    if (isVertical) {
+      // 縦書きの場合: 各列の一番上のセル（空でない最初のセル）
+      for (let r = 0; r < table.length; r++) {
+        if (!isCellEmpty(table, r, col)) {
+          return r === row;
+        }
+      }
+    } else {
+      // 横書きの場合: 各行の一番左のセル（空でない最初のセル）
+      for (let c = 0; c < table[row].length; c++) {
+        if (!isCellEmpty(table, row, c)) {
+          return c === col;
+        }
+      }
+    }
+    
+    return false;
+  };
+
   // セルに枠線が必要かチェック
   const needsBorder = (table: string[][], row: number, col: number) => {
     if (isCellEmpty(table, row, col)) return false;
     
-    // 行番号セルかどうかをチェック
-    const cell = table[row][col];
-    // 数値のみで構成されているかチェック（行番号）
-    if (/^\d+$/.test(cell)) {
+    // 行番号位置の場合は枠線を表示しない
+    if (isRowNumberPosition(table, row, col)) {
       return false;
     }
     
@@ -127,6 +221,9 @@ export default function SakananohonePage() {
               <li>左側に単語リスト、右側に読む位置を入力します。</li>
               <li>単語リストと読む位置は改行区切りで入力し、同じ行数で対応させます。</li>
               <li>読む位置は数値で入力してください（例：1、2、3）。</li>
+              <li>「縦書き」チェックボックスをONにすると、単語が縦方向に配置されます。</li>
+              <li>行番号の種類を「数字」「ABC」「あいう」「いろは」から選択できます。</li>
+              <li>文字が足りない場合は最初に戻ってループします（A,B,...,Z,A,B...）。</li>
               <li>「生成」ボタンで魚の骨形の表を作成します。</li>
               <li>読む位置に対応する文字が黄色でハイライトされます。</li>
               <li>「サンプル」ボタンで例のデータを入力できます。</li>
@@ -165,20 +262,48 @@ export default function SakananohonePage() {
         </div>
       </div>
 
-      {/* ボタン */}
-      <div className="mb-6 flex gap-2">
-        <button
-          className="px-6 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-          onClick={handleGenerate}
-        >生成</button>
-        <button
-          className="px-6 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
-          onClick={handleReset}
-        >リセット</button>
-        <button
-          className="px-6 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
-          onClick={handleSample}
-        >サンプル</button>
+      {/* オプションとボタン */}
+      <div className="mb-6">
+        <div className="mb-4 space-y-3">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={isVertical}
+              onChange={(e) => setIsVertical(e.target.checked)}
+              className="w-4 h-4"
+            />
+            <span className="text-sm font-medium">縦書き（単語を縦方向に配置）</span>
+          </label>
+          
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">行番号の種類:</span>
+            <select
+              value={rowNumberType}
+              onChange={(e) => setRowNumberType(e.target.value as "数字" | "ABC" | "あいう" | "いろは")}
+              className="px-3 py-1 border rounded text-sm"
+            >
+              <option value="数字">数字 (1,2,3...)</option>
+              <option value="ABC">ABC (A,B,C...)</option>
+              <option value="あいう">あいう (あ,い,う...)</option>
+              <option value="いろは">いろは (い,ろ,は...)</option>
+            </select>
+          </div>
+        </div>
+        
+        <div className="flex gap-2">
+          <button
+            className="px-6 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+            onClick={handleGenerate}
+          >生成</button>
+          <button
+            className="px-6 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+            onClick={handleReset}
+          >リセット</button>
+          <button
+            className="px-6 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+            onClick={handleSample}
+          >サンプル</button>
+        </div>
       </div>
 
       {/* 結果表示 */}
@@ -222,7 +347,8 @@ export default function SakananohonePage() {
 
       <div className="text-sm text-gray-600">
         <p>※ 黄色でハイライトされた文字が「読む位置」に対応しています</p>
-        <p>※ 空白セルには枠線が表示されません</p>
+        <p>※ 縦書きモードでは、各単語が縦（列）方向に配置されます</p>
+        <p>※ 行番号は選択した文字種で表示され、文字が足りない場合は最初からループします</p>
       </div>
     </main>
   );
