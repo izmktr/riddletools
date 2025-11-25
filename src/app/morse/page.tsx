@@ -193,9 +193,6 @@ export default function MorsePage() {
     const trimmedText = text.trim();
     if (!trimmedText) return false;
     
-    const shortRegex = new RegExp(escapeRegExp(shortSymbol), 'g');
-    const longRegex = new RegExp(escapeRegExp(longSymbol), 'g');
-    
     // 短い音、長い音、スペース、タブのみで構成されているかチェック
     const morsePattern = new RegExp(`^[${escapeRegExp(shortSymbol)}${escapeRegExp(longSymbol)}\\s]+$`);
     return morsePattern.test(trimmedText);

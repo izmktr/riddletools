@@ -90,7 +90,7 @@ export default function SudokuSolver() {
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [selectedCell, board]);
+  }, [selectedCell, board, handleNumberClick]);
 
   // リセット
   const handleReset = () => {
@@ -323,7 +323,7 @@ export default function SudokuSolver() {
     setInitialBoard(board.map(row => [...row]));
     
     // 使用可能数字を初期化
-    let possible = initializePossibleNumbers(currentBoard);
+    const possible = initializePossibleNumbers(currentBoard);
     
     let iterations = 0;
     const maxIterations = 100;

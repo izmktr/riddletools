@@ -180,13 +180,9 @@ describe('Skeleton Solver Data Structure Tests', () => {
 
 describe('Skeleton Solver Algorithm Tests', () => {
   test('十字型のシンプルなパズル設定', () => {
-    const wordList = ['あい', 'いう'];
-    
     // L字型でテスト: 横2マス + 縦2マス（交差点あり）
     const horizontalSlot = createHorizontalSlot(1, 1, 2); // (1,1), (1,2)
     const verticalSlot = createVerticalSlot(1, 1, 2);     // (1,1), (2,1)
-    
-    const slots = [horizontalSlot, verticalSlot];
     
     // 交差点は(1,1)
     expect(horizontalSlot.positions[0]).toEqual({ row: 1, col: 1 });
@@ -336,7 +332,6 @@ describe('Skeleton Solver Edge Cases', () => {
 describe('Skeleton Solver Performance', () => {
   test('中程度のパズルが合理的な時間で完了する', () => {
     const startTime = Date.now();
-    const wordList = ["あい", "いう", "うえ", "えお", "おか"];
     const slots = [
       createHorizontalSlot(0, 0, 2),
       createHorizontalSlot(1, 0, 2),

@@ -80,7 +80,7 @@ export default function ChineseRemainderTheorem() {
       }
 
       // 拡張ユークリッド互除法で係数を求める
-      const { x: u, y: v } = extendedGcd(m, n);
+      const { x: u } = extendedGcd(m, n);
       
       // 新しい解を計算
       const newX = x + m * u * ((a - x) / g);
