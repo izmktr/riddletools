@@ -19,6 +19,7 @@ export default function SudokuSolver() {
     Array(9).fill(null).map(() => Array(9).fill(null))
   );
   const [selectedCell, setSelectedCell] = useState<{row: number, col: number} | null>(null);
+  const [alternateSolutions, setAlternateSolutions] = useState<SudokuBoard[]>([]);
 
   // セッションストレージから復元
   useEffect(() => {
@@ -98,6 +99,7 @@ export default function SudokuSolver() {
     setBoard(emptyBoard);
     setPossibleNumbers(Array(9).fill(null).map(() => Array(9).fill(null)));
     setInitialBoard(Array(9).fill(null).map(() => Array(9).fill(null)));
+    setAlternateSolutions([]);
     saveToStorage(emptyBoard);
     setSelectedCell(null);
   };
@@ -314,6 +316,91 @@ export default function SudokuSolver() {
     return changed;
   };
 
+  // 盤面が完成しているかチェック
+  const isComplete = (currentBoard: SudokuBoard): boolean => {
+    for (let row = 0; row < 9; row++) {
+      for (let col = 0; col < 9; col++) {
+        if (currentBoard[row][col] === null) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  // バックトラック法で解を探す
+  const solveWithBacktrack = (
+    currentBoard: SudokuBoard, 
+    possible: PossibleBoard, 
+    solutions: SudokuBoard[], 
+    maxSolutions: number
+  ): void => {
+    if (solutions.length >= maxSolutions) return;
+
+    // 基本的な解法を適用
+    let changed = true;
+    while (changed) {
+      changed = false;
+      eliminateByHints(currentBoard, possible);
+      
+      if (findSinglePossible(currentBoard, possible)) {
+        changed = true;
+        eliminateByHints(currentBoard, possible);
+      }
+      
+      if (findUniqueCandidate(currentBoard, possible)) {
+        changed = true;
+        eliminateByHints(currentBoard, possible);
+      }
+    }
+
+    // 完成チェック
+    if (isComplete(currentBoard)) {
+      solutions.push(currentBoard.map(row => [...row]));
+      return;
+    }
+
+    // 候補が最も少ないマスを探す
+    let minSize = 10;
+    let targetRow = -1;
+    let targetCol = -1;
+
+    for (let row = 0; row < 9; row++) {
+      for (let col = 0; col < 9; col++) {
+        if (currentBoard[row][col] === null && possible[row][col]) {
+          const size = possible[row][col]!.size;
+          if (size > 0 && size < minSize) {
+            minSize = size;
+            targetRow = row;
+            targetCol = col;
+          }
+        }
+      }
+    }
+
+    // 空きマスがない、または候補がないマスがある場合は矛盾
+    if (targetRow === -1) return;
+
+    // 各候補を試す
+    const candidates = Array.from(possible[targetRow][targetCol]!);
+    for (const num of candidates) {
+      if (solutions.length >= maxSolutions) return;
+
+      // 盤面と候補をコピー
+      const newBoard = currentBoard.map(row => [...row]);
+      const newPossible: PossibleBoard = possible.map(row => 
+        row.map(cell => cell ? new Set(cell) : null)
+      );
+
+      // 仮置き
+      newBoard[targetRow][targetCol] = num.toString();
+      newPossible[targetRow][targetCol] = null;
+
+      // 再帰的に解く
+      solveWithBacktrack(newBoard, newPossible, solutions, maxSolutions);
+    }
+  };
+
   // 解析実行
   const handleAnalyze = () => {
     // 現在の盤面をコピー
@@ -358,10 +445,69 @@ export default function SudokuSolver() {
         break;
       }
     }
-    
-    setBoard(currentBoard);
-    setPossibleNumbers(possible);
-    saveToStorage(currentBoard);
+
+    // 基本解法で解けない場合、バックトラック法を試す
+    if (!isComplete(currentBoard)) {
+      const solutions: SudokuBoard[] = [];
+      const boardCopy = currentBoard.map(row => [...row]);
+      const possibleCopy: PossibleBoard = possible.map(row => 
+        row.map(cell => cell ? new Set(cell) : null)
+      );
+      
+      solveWithBacktrack(boardCopy, possibleCopy, solutions, 3); // 最大3つの解を探す
+      
+      if (solutions.length > 0) {
+        // 最初の解を表示
+        setBoard(solutions[0]);
+        setPossibleNumbers(Array(9).fill(null).map(() => Array(9).fill(null)));
+        saveToStorage(solutions[0]);
+        
+        // 別解があれば保存（最大2つ）
+        if (solutions.length > 1) {
+          setAlternateSolutions(solutions.slice(1, 3));
+        } else {
+          setAlternateSolutions([]);
+        }
+      } else {
+        // 解が見つからない
+        setBoard(currentBoard);
+        setPossibleNumbers(possible);
+        saveToStorage(currentBoard);
+        setAlternateSolutions([]);
+      }
+    } else {
+      // 基本解法で完成した場合でも、別解を探す
+      const solutions: SudokuBoard[] = [];
+      
+      const boardCopy = board.map(row => [...row]); // 初期盤面から
+      const possibleCopy = initializePossibleNumbers(boardCopy);
+      
+      solveWithBacktrack(boardCopy, possibleCopy, solutions, 3); // 最大3つの解を探す
+      
+      setBoard(currentBoard);
+      setPossibleNumbers(possible);
+      saveToStorage(currentBoard);
+      
+      // 別解があれば保存（最大2つ、現在の解を除いて2つ以上あるかチェック）
+      if (solutions.length > 1) {
+        // 現在の解と異なる解のみを抽出
+        const alternates = solutions.filter((sol, index) => {
+          // 最初の解は現在の解と同じ可能性が高いのでスキップ
+          if (index === 0) {
+            // 現在の解と完全一致するかチェック
+            const isSame = sol.every((row, r) => 
+              row.every((cell, c) => cell === currentBoard[r][c])
+            );
+            return !isSame;
+          }
+          return true;
+        }).slice(0, 2);
+        
+        setAlternateSolutions(alternates);
+      } else {
+        setAlternateSolutions([]);
+      }
+    }
   };
 
   // セルのスタイルを取得
@@ -428,34 +574,93 @@ export default function SudokuSolver() {
       </div>
 
       <div className="flex flex-col xl:flex-row gap-8">
-        {/* 数独盤面 */}
-        <div className="flex-1 flex justify-center">
-          <div className="inline-block">
-            {board.map((row, rowIndex) => (
-              <div key={rowIndex} className="flex">
-                {row.map((cell, colIndex) => (
-                  <div
-                    key={`${rowIndex}-${colIndex}`}
-                    className={getCellStyle(rowIndex, colIndex)}
-                    onClick={() => handleCellClick(rowIndex, colIndex)}
-                  >
-                    {cell || (possibleNumbers[rowIndex][colIndex] ? (
-                      <div className="grid grid-cols-3 gap-0 w-full h-full text-[6px] leading-none">
-                        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
-                          <div key={num} className="flex items-center justify-center">
-                            {possibleNumbers[rowIndex][colIndex]!.has(num) ? num : ''}
-                          </div>
-                        ))}
-                      </div>
-                    ) : '')}
+        {/* 左側: 数独盤面と別解 */}
+        <div className="flex-1">
+          {/* メイン盤面 */}
+          <div className="flex justify-center mb-8">
+            <div className="inline-block">
+              {board.map((row, rowIndex) => (
+                <div key={rowIndex} className="flex">
+                  {row.map((cell, colIndex) => (
+                    <div
+                      key={`${rowIndex}-${colIndex}`}
+                      className={getCellStyle(rowIndex, colIndex)}
+                      onClick={() => handleCellClick(rowIndex, colIndex)}
+                    >
+                      {cell || (possibleNumbers[rowIndex][colIndex] ? (
+                        <div className="grid grid-cols-3 gap-0 w-full h-full text-[6px] leading-none">
+                          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+                            <div key={num} className="flex items-center justify-center">
+                              {possibleNumbers[rowIndex][colIndex]!.has(num) ? num : ''}
+                            </div>
+                          ))}
+                        </div>
+                      ) : '')}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 別解の表示 */}
+          {alternateSolutions.length > 0 && (
+            <div>
+              <h2 className="text-2xl font-bold mb-4 text-center">別解</h2>
+              <div className="flex flex-wrap gap-8 justify-center">
+                {alternateSolutions.map((solution, index) => (
+                  <div key={index} className="flex flex-col items-center">
+                    <h3 className="text-lg font-medium mb-2">別解 {index + 1}</h3>
+                    <div className="inline-block">
+                      {solution.map((row, rowIndex) => (
+                        <div key={rowIndex} className="flex">
+                          {row.map((cell, colIndex) => {
+                            const isInitial = initialBoard[rowIndex][colIndex] !== null;
+                            
+                            let baseStyle = 'w-12 h-12 border border-gray-400 flex items-center justify-center text-lg font-medium';
+                            let filledStyle = isInitial ? ' bg-yellow-100' : ' bg-blue-100';
+                            let borderStyle = '';
+                            
+                            if (colIndex === 2 || colIndex === 5) {
+                              borderStyle += ' border-r-2 border-r-gray-700';
+                            } else if (colIndex === 8) {
+                              borderStyle += ' border-r-4 border-r-black';
+                            }
+                            
+                            if (rowIndex === 2 || rowIndex === 5) {
+                              borderStyle += ' border-b-2 border-b-gray-700';
+                            } else if (rowIndex === 8) {
+                              borderStyle += ' border-b-4 border-b-black';
+                            }
+                            
+                            if (colIndex === 0) {
+                              borderStyle += ' border-l-4 border-l-black';
+                            }
+                            
+                            if (rowIndex === 0) {
+                              borderStyle += ' border-t-4 border-t-black';
+                            }
+                            
+                            return (
+                              <div
+                                key={`${rowIndex}-${colIndex}`}
+                                className={baseStyle + filledStyle + borderStyle}
+                              >
+                                {cell}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
 
-        {/* コントロールパネル */}
+        {/* 右側: コントロールパネル */}
         <div className="w-full xl:w-80">
           {/* 選択中のセル表示 */}
           <div className="mb-6 p-4 bg-gray-100 rounded">
