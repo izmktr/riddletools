@@ -617,8 +617,8 @@ export default function SudokuSolver() {
                           {row.map((cell, colIndex) => {
                             const isInitial = initialBoard[rowIndex][colIndex] !== null;
                             
-                            let baseStyle = 'w-12 h-12 border border-gray-400 flex items-center justify-center text-lg font-medium';
-                            let filledStyle = isInitial ? ' bg-yellow-100' : ' bg-blue-100';
+                            const baseStyle = 'w-12 h-12 border border-gray-400 flex items-center justify-center text-lg font-medium';
+                            const filledStyle = isInitial ? ' bg-yellow-100' : ' bg-blue-100';
                             let borderStyle = '';
                             
                             if (colIndex === 2 || colIndex === 5) {
