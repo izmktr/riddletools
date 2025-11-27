@@ -20,6 +20,7 @@ export default function SudokuSolver() {
   );
   const [selectedCell, setSelectedCell] = useState<{row: number, col: number} | null>(null);
   const [alternateSolutions, setAlternateSolutions] = useState<SudokuBoard[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string>('');
 
   // セッションストレージから復元
   useEffect(() => {
@@ -100,6 +101,7 @@ export default function SudokuSolver() {
     setPossibleNumbers(Array(9).fill(null).map(() => Array(9).fill(null)));
     setInitialBoard(Array(9).fill(null).map(() => Array(9).fill(null)));
     setAlternateSolutions([]);
+    setErrorMessage('');
     saveToStorage(emptyBoard);
     setSelectedCell(null);
   };
@@ -143,6 +145,24 @@ export default function SudokuSolver() {
       for (let c = startCol; c < startCol + 3; c++) {
         cells.push({row: r, col: c});
       }
+    }
+    return cells;
+  };
+
+  // 同じ行のセル座標を取得
+  const getRowCells = (rowIndex: number): Array<{row: number, col: number}> => {
+    const cells: Array<{row: number, col: number}> = [];
+    for (let col = 0; col < 9; col++) {
+      cells.push({row: rowIndex, col});
+    }
+    return cells;
+  };
+
+  // 同じ列のセル座標を取得
+  const getColCells = (colIndex: number): Array<{row: number, col: number}> => {
+    const cells: Array<{row: number, col: number}> = [];
+    for (let row = 0; row < 9; row++) {
+      cells.push({row, col: colIndex});
     }
     return cells;
   };
@@ -219,67 +239,10 @@ export default function SudokuSolver() {
     let changed = false;
     const toConfirm: Array<{row: number, col: number, num: number}> = [];
     
-    // 各行をチェック
-    for (let row = 0; row < 9; row++) {
+    // 指定されたセル群で唯一の候補を探す共通処理
+    const findUniqueCandidateInCells = (cells: Array<{row: number, col: number}>) => {
       for (let num = 1; num <= 9; num++) {
-        // この行で既にnumが確定しているかチェック
-        let alreadyPlaced = false;
-        for (let c = 0; c < 9; c++) {
-          if (currentBoard[row][c] === num.toString()) {
-            alreadyPlaced = true;
-            break;
-          }
-        }
-        if (alreadyPlaced) continue;
-        
-        const candidates: number[] = [];
-        for (let col = 0; col < 9; col++) {
-          if (possible[row][col]?.has(num)) {
-            candidates.push(col);
-          }
-        }
-        if (candidates.length === 1) {
-          const col = candidates[0];
-          if (currentBoard[row][col] === null) {
-            toConfirm.push({row, col, num});
-          }
-        }
-      }
-    }
-    
-    // 各列をチェック
-    for (let col = 0; col < 9; col++) {
-      for (let num = 1; num <= 9; num++) {
-        // この列で既にnumが確定しているかチェック
-        let alreadyPlaced = false;
-        for (let r = 0; r < 9; r++) {
-          if (currentBoard[r][col] === num.toString()) {
-            alreadyPlaced = true;
-            break;
-          }
-        }
-        if (alreadyPlaced) continue;
-        
-        const candidates: number[] = [];
-        for (let row = 0; row < 9; row++) {
-          if (possible[row][col]?.has(num)) {
-            candidates.push(row);
-          }
-        }
-        if (candidates.length === 1) {
-          const row = candidates[0];
-          if (currentBoard[row][col] === null) {
-            toConfirm.push({row, col, num});
-          }
-        }
-      }
-    }
-    
-    // 各ブロックをチェック
-    for (let blockIndex = 0; blockIndex < 9; blockIndex++) {
-      const cells = getBlockCells(blockIndex);
-      for (let num = 1; num <= 9; num++) {
-        // このブロックで既にnumが確定しているかチェック
+        // 既にnumが確定しているかチェック
         let alreadyPlaced = false;
         for (const cell of cells) {
           if (currentBoard[cell.row][cell.col] === num.toString()) {
@@ -289,12 +252,15 @@ export default function SudokuSolver() {
         }
         if (alreadyPlaced) continue;
         
+        // 候補となるセルを収集
         const candidates: Array<{row: number, col: number}> = [];
         for (const cell of cells) {
           if (possible[cell.row][cell.col]?.has(num)) {
             candidates.push(cell);
           }
         }
+        
+        // 候補が1つだけの場合、確定リストに追加
         if (candidates.length === 1) {
           const {row, col} = candidates[0];
           if (currentBoard[row][col] === null) {
@@ -302,6 +268,21 @@ export default function SudokuSolver() {
           }
         }
       }
+    };
+    
+    // 各行をチェック
+    for (let row = 0; row < 9; row++) {
+      findUniqueCandidateInCells(getRowCells(row));
+    }
+    
+    // 各列をチェック
+    for (let col = 0; col < 9; col++) {
+      findUniqueCandidateInCells(getColCells(col));
+    }
+    
+    // 各ブロックをチェック
+    for (let blockIndex = 0; blockIndex < 9; blockIndex++) {
+      findUniqueCandidateInCells(getBlockCells(blockIndex));
     }
     
     // 確定処理（重複チェック付き）
@@ -326,6 +307,56 @@ export default function SudokuSolver() {
       }
     }
     return true;
+  };
+
+  // 初期盤面が妥当かチェック
+  const validateBoard = (currentBoard: SudokuBoard): {valid: boolean, message: string} => {
+    // 各行をチェック
+    for (let row = 0; row < 9; row++) {
+      const numbers = new Set<string>();
+      for (let col = 0; col < 9; col++) {
+        const value = currentBoard[row][col];
+        if (value !== null) {
+          if (numbers.has(value)) {
+            return {valid: false, message: `行${row + 1}に数字${value}が重複しています`};
+          }
+          numbers.add(value);
+        }
+      }
+    }
+    
+    // 各列をチェック
+    for (let col = 0; col < 9; col++) {
+      const numbers = new Set<string>();
+      for (let row = 0; row < 9; row++) {
+        const value = currentBoard[row][col];
+        if (value !== null) {
+          if (numbers.has(value)) {
+            return {valid: false, message: `列${col + 1}に数字${value}が重複しています`};
+          }
+          numbers.add(value);
+        }
+      }
+    }
+    
+    // 各ブロックをチェック
+    for (let blockIndex = 0; blockIndex < 9; blockIndex++) {
+      const numbers = new Set<string>();
+      const cells = getBlockCells(blockIndex);
+      for (const cell of cells) {
+        const value = currentBoard[cell.row][cell.col];
+        if (value !== null) {
+          if (numbers.has(value)) {
+            const blockRow = Math.floor(blockIndex / 3) + 1;
+            const blockCol = (blockIndex % 3) + 1;
+            return {valid: false, message: `ブロック(${blockRow},${blockCol})に数字${value}が重複しています`};
+          }
+          numbers.add(value);
+        }
+      }
+    }
+    
+    return {valid: true, message: ''};
   };
 
   // バックトラック法で解を探す
@@ -403,8 +434,18 @@ export default function SudokuSolver() {
 
   // 解析実行
   const handleAnalyze = () => {
+    // エラーメッセージをクリア
+    setErrorMessage('');
+    
     // 現在の盤面をコピー
     const currentBoard: SudokuBoard = board.map(row => [...row]);
+    
+    // 盤面の妥当性をチェック
+    const validation = validateBoard(currentBoard);
+    if (!validation.valid) {
+      setErrorMessage(validation.message);
+      return;
+    }
     
     // 初期盤面を保存（解析前の状態）
     setInitialBoard(board.map(row => [...row]));
@@ -719,6 +760,13 @@ export default function SudokuSolver() {
               解析
             </button>
           </div>
+
+          {/* エラーメッセージ */}
+          {errorMessage && (
+            <div className="mt-4 p-3 bg-red-100 border border-red-300 rounded text-red-700 text-sm">
+              <strong>エラー:</strong> {errorMessage}
+            </div>
+          )}
 
           {/* 操作説明 */}
           <div className="mt-8 p-4 bg-blue-50 rounded">
