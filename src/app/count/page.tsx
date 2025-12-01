@@ -5,7 +5,8 @@ import Link from "next/link";
 export default function CountPage() {
   const [showManual, setShowManual] = useState(false);
   const [text, setText] = useState("");
-  const [sortType, setSortType] = useState<string | null>(null);
+  const [sortType, setSortType] = useState<string | null>("count");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [filterType, setFilterType] = useState<string | null>(null);
 
   // 文字ごとのカウント
@@ -15,10 +16,27 @@ export default function CountPage() {
   }, {} as Record<string, number>);
 
   let result = Object.entries(charCount);
-  if (sortType === "char") result = result.sort((a, b) => a[0].localeCompare(b[0]));
-  if (sortType === "count") result = result.sort((a, b) => b[1] - a[1]);
+  if (sortType === "char") {
+    result = sortOrder === "asc" 
+      ? result.sort((a, b) => a[0].localeCompare(b[0]))
+      : result.sort((a, b) => b[0].localeCompare(a[0]));
+  }
+  if (sortType === "count") {
+    result = sortOrder === "asc"
+      ? result.sort((a, b) => a[1] - b[1])
+      : result.sort((a, b) => b[1] - a[1]);
+  }
   if (filterType === "odd") result = result.filter(([, count]) => count % 2 === 1);
   if (filterType === "even") result = result.filter(([, count]) => count % 2 === 0);
+
+  const handleSortClick = (type: string) => {
+    if (sortType === type) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortType(type);
+      setSortOrder("asc");
+    }
+  };
 
   return (
     <main className="max-w-xl mx-auto p-6">
@@ -60,12 +78,50 @@ export default function CountPage() {
         onChange={e => setText(e.target.value)}
         placeholder="複数行入力できます"
       />
-      <div className="flex gap-2 mb-4">
-        <button className="px-3 py-1 bg-blue-200 rounded" onClick={() => setSortType("char")}>並び替え(文字)</button>
-        <button className="px-3 py-1 bg-blue-200 rounded" onClick={() => setSortType("count")}>並び替え(個数)</button>
-        <button className="px-3 py-1 bg-blue-200 rounded" onClick={() => setFilterType("odd")}>奇数個のみ表示</button>
-        <button className="px-3 py-1 bg-blue-200 rounded" onClick={() => setFilterType("even")}>偶数個のみ表示</button>
-        <button className="px-3 py-1 bg-gray-200 rounded" onClick={() => {setSortType(null);setFilterType(null);setText("");}}>リセット</button>
+      <div className="mb-4">
+        <div className="mb-2">
+          <span className="text-sm font-semibold mr-2">並び替え:</span>
+          <div className="inline-flex gap-2">
+            <button 
+              className={`px-3 py-1 rounded ${sortType === "count" ? "bg-blue-500 text-white" : "bg-blue-200"}`}
+              onClick={() => handleSortClick("count")}
+            >
+              個数({sortType === "count" ? (sortOrder === "asc" ? "昇順" : "降順") : "昇順"})
+            </button>
+            <button 
+              className={`px-3 py-1 rounded ${sortType === "char" ? "bg-blue-500 text-white" : "bg-blue-200"}`}
+              onClick={() => handleSortClick("char")}
+            >
+              文字({sortType === "char" ? (sortOrder === "asc" ? "昇順" : "降順") : "昇順"})
+            </button>
+          </div>
+        </div>
+        <div className="mb-2">
+          <span className="text-sm font-semibold mr-2">絞り込み:</span>
+          <div className="inline-flex gap-2">
+            <button 
+              className={`px-3 py-1 rounded ${filterType === null ? "bg-blue-500 text-white" : "bg-blue-200"}`}
+              onClick={() => setFilterType(null)}
+            >
+              なし
+            </button>
+            <button 
+              className={`px-3 py-1 rounded ${filterType === "odd" ? "bg-blue-500 text-white" : "bg-blue-200"}`}
+              onClick={() => setFilterType("odd")}
+            >
+              奇数個のみ
+            </button>
+            <button 
+              className={`px-3 py-1 rounded ${filterType === "even" ? "bg-blue-500 text-white" : "bg-blue-200"}`}
+              onClick={() => setFilterType("even")}
+            >
+              偶数個のみ
+            </button>
+          </div>
+        </div>
+        <div>
+          <button className="px-3 py-1 bg-gray-200 rounded" onClick={() => {setSortType(null);setSortOrder("asc");setFilterType(null);setText("");}}>リセット</button>
+        </div>
       </div>
       <div>
         <table className="w-full border">
