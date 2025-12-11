@@ -632,6 +632,7 @@ export default function SkeletonPage() {
       // 候補が1個しかないスロットを確定
       slots.forEach(slot => {
         if (slot.confirmedWord == null && slot.candidates.length === 1) {
+          if (trashSlots.includes(slot)) return;
           slot.confirmedWord = slot.candidates[0];
           trashSlots.push(slot);
         }
@@ -769,8 +770,6 @@ export default function SkeletonPage() {
         </div>
       )}
 
-      <h2 className="text-2xl font-bold mb-4">スケルトンソルバー</h2>
-      
       <div className="mb-4">
         <h3 className="font-semibold mb-2">単語入力</h3>
         <textarea

@@ -44,6 +44,7 @@ export default function CryptarithmeticPage() {
     
     // すべての文字を抽出
     const allChars = new Set<string>();
+    const usedDigits = new Set<number>(); // すでに式に含まれている数字
     const processedEquations: Array<{left: string, right: string}> = [];
     
     for (const equation of equations) {
@@ -59,6 +60,10 @@ export default function CryptarithmeticPage() {
       // 文字を抽出（A-Z、a-z）
       const chars = (left + right).match(/[A-Za-z]/g) || [];
       chars.forEach(char => allChars.add(char.toUpperCase()));
+      
+      // すでに使用されている数字を抽出
+      const digits = (left + right).match(/\d/g) || [];
+      digits.forEach(digit => usedDigits.add(parseInt(digit)));
       
       processedEquations.push({ left, right });
     }
@@ -76,6 +81,14 @@ export default function CryptarithmeticPage() {
 
     if (uniqueChars.length === 0) {
       results.push('エラー: アルファベット文字が見つかりませんでした');
+      return results;
+    }
+
+    // 使用可能な数字を計算
+    const availableDigits = Array.from({length: 10}, (_, i) => i).filter(digit => !usedDigits.has(digit));
+    
+    if (uniqueChars.length > availableDigits.length) {
+      results.push(`エラー: 文字数（${uniqueChars.length}）が使用可能な数字数（${availableDigits.length}）を超えています`);
       return results;
     }
 
@@ -150,7 +163,7 @@ export default function CryptarithmeticPage() {
       const currentChar = uniqueChars[charIndex];
       const isLeading = leadingChars.has(currentChar);
 
-      for (let digit = 0; digit <= 9; digit++) {
+      for (const digit of availableDigits) {
         // 制約チェック
         if (usedDigits.has(digit)) continue; // この数字は使用済み
         if (isLeading && digit === 0) continue; // 先頭文字は0にできない
@@ -238,6 +251,7 @@ export default function CryptarithmeticPage() {
             <li>• 複数の式を改行で区切って入力できます</li>
             <li>• 複数桁の数の先頭は0になりません</li>
             <li>• 対応演算子: +、-、*、/、^（累乗）</li>
+            <li>• 数字が既に含まれている場合、その数字は文字に割り当てられません</li>
           </ul>
         </div>
 
@@ -267,6 +281,12 @@ export default function CryptarithmeticPage() {
               className="px-3 py-1 bg-purple-100 text-purple-700 rounded text-sm hover:bg-purple-200"
             >
               A^B = C（累乗）
+            </button>
+            <button
+              onClick={() => handleExample('a + 4 = b')}
+              className="px-3 py-1 bg-orange-100 text-orange-700 rounded text-sm hover:bg-orange-200"
+            >
+              a + 4 = b（数字混在）
             </button>
             <button
               onClick={() => handleExample('A + B = C\nD + E = F\nG + H = I')}
@@ -342,6 +362,7 @@ export default function CryptarithmeticPage() {
           <li>複数桁の数の先頭桁は0になりません</li>
           <li>解の数が多い場合は最初の10個まで表示されます</li>
           <li>複雑な式や文字数が多い場合は計算に時間がかかることがあります</li>
+          <li>数字が既に含まれている場合、その数字は他の文字に割り当てられません</li>
         </ul>
       </div>
     </div>
