@@ -632,6 +632,7 @@ export default function SkeletonPage() {
       // 候補が1個しかないスロットを確定
       slots.forEach(slot => {
         if (slot.confirmedWord == null && slot.candidates.length === 1) {
+          if (trashSlots.includes(slot)) return;
           slot.confirmedWord = slot.candidates[0];
           trashSlots.push(slot);
         }
