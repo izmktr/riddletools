@@ -418,7 +418,6 @@ class Field {
     }
 
     // 壁を伸ばす処理
-    /*
     if (0 < this.remainingWalls){
       for (const wallGroup of this.wallGroups) {
         if (this.remainingWalls <= 0) break;
@@ -436,10 +435,12 @@ class Field {
           const pos = Position.fromHash(hash);
           this.addWall(pos.x, pos.y);
           changed = true;
+          break; // 壁を追加したらループを抜けて、analyzeを最初からやり直す
         }
       }
-    }    
-    */
+    }
+
+    if (changed) { return changed; }
 
     // 到達可能リストを作成する
     for (const island of this.islands) {
