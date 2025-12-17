@@ -17,9 +17,10 @@ export default function Home() {
   const Solver = [
     ["しりとりソルバー", "/shiritori"],
     ["スケルトンソルバー", "/skeleton"],
-    ["数独ソルバー", "/sudoku"],
     ["覆面算ソルバー", "/cryptarithmetic"],
+    ["数独ソルバー", "/sudoku"],
     ["中国剰余定理", "/chinese-remainder"],
+    ["ぬりかべソルバー(WIP)", "/nurikabe"],
   ];
 
   // 色のグラデーション生成関数
