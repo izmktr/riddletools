@@ -522,6 +522,7 @@ export default function NurikabePage() {
   const [field, setField] = useState<Field | null>(null);
   const [selectedCell, setSelectedCell] = useState<{x: number, y: number} | null>(null);
   const [highlightedCells, setHighlightedCells] = useState<Set<number>>(new Set());
+  const [manualWalls, setManualWalls] = useState<Set<number>>(new Set());
 
   // 盤面サイズ変更
   const handleSizeChange = () => {
@@ -571,6 +572,9 @@ export default function NurikabePage() {
         for (const hash of cell.wallGroup) {
           highlighted.add(hash);
         }
+      } else if (cell.type === 'undecided') {
+        // 未確定：自身をハイライト
+        highlighted.add(new Position(col, row).toHash());
       }
       
       setHighlightedCells(highlighted);
@@ -611,12 +615,53 @@ export default function NurikabePage() {
     setIsAnalyzeMode(true);
   };
 
+  // 手動壁を追加/削除
+  const handleToggleManualWall = () => {
+    if (!selectedCell || !field) return;
+    const cell = field.cells[selectedCell.y][selectedCell.x];
+    if (cell.type !== 'undecided') return;
+    
+    const hash = new Position(selectedCell.x, selectedCell.y).toHash();
+    const newManualWalls = new Set(manualWalls);
+    
+    if (newManualWalls.has(hash)) {
+      newManualWalls.delete(hash);
+    } else {
+      newManualWalls.add(hash);
+    }
+    
+    setManualWalls(newManualWalls);
+  };
+
+  // 再解析
+  const handleReanalyze = () => {
+    if (!field) return;
+    
+    // 手動壁を追加
+    for (const hash of manualWalls) {
+      const pos = Position.fromHash(hash);
+      field.addWall(pos.x, pos.y);
+    }
+    
+    // 解析を続行
+    field.solve();
+    
+    // 手動壁をクリア
+    setManualWalls(new Set());
+    setSelectedCell(null);
+    setHighlightedCells(new Set());
+    
+    // フィールドを更新
+    setField(field);
+  };
+
   // 入力に戻る
   const handleBackToInput = () => {
     setIsAnalyzeMode(false);
     setField(null);
     setSelectedCell(null);
     setHighlightedCells(new Set());
+    setManualWalls(new Set());
   };
 
   // リセット
@@ -719,10 +764,24 @@ export default function NurikabePage() {
             >サンプル</button>
           </>
         ) : (
-          <button
-            className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-            onClick={handleBackToInput}
-          >入力に戻る</button>
+          <>
+            <button
+              className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+              onClick={handleBackToInput}
+            >入力に戻る</button>
+            <button
+              className="px-4 py-2 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 disabled:opacity-50"
+              onClick={handleToggleManualWall}
+              disabled={!selectedCell || !field || field.cells[selectedCell.y][selectedCell.x].type !== 'undecided'}
+            >
+              {selectedCell && field && field.cells[selectedCell.y][selectedCell.x].type === 'undecided' && manualWalls.has(new Position(selectedCell.x, selectedCell.y).toHash()) ? '壁を削除' : '壁を追加'}
+            </button>
+            <button
+              className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:opacity-50"
+              onClick={handleReanalyze}
+              disabled={manualWalls.size === 0}
+            >再解析</button>
+          </>
         )}
       </div>
 
@@ -763,6 +822,10 @@ export default function NurikabePage() {
                         bgColor = "bg-yellow-200";
                       } else if (fieldCell.type === 'wall') {
                         bgColor = "bg-black";
+                        textContent = "";
+                      } else if (fieldCell.type === 'undecided' && manualWalls.has(hash)) {
+                        // 手動で追加された壁
+                        bgColor = "bg-gray-500";
                         textContent = "";
                       } else {
                         bgColor = "bg-white";
@@ -828,10 +891,13 @@ export default function NurikabePage() {
                 </div>
               );
             } else {
+              const hash = new Position(selectedCell.x, selectedCell.y).toHash();
+              const isManualWall = manualWalls.has(hash);
               return (
                 <div>
                   <p><strong>種類：</strong>未確定</p>
                   <p><strong>到達オーナー数：</strong>{cell.reachableOwners.length}</p>
+                  {isManualWall && <p><strong>状態：</strong>手動壁（灰色）</p>}
                 </div>
               );
             }
