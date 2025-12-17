@@ -806,10 +806,11 @@ export default function NurikabePage() {
                     if (isHighlighted) {
                       if (fieldCell.type === 'wall') {
                         bgColor = "bg-red-400";
-                      } else if (fieldCell.type === 'owner' || 
-                                 (fieldCell.ownerIsland && fieldCell.ownerIsland.confirmedCells.has(hash))) {
+                      } else if (fieldCell.type === 'owner' || fieldCell.type === 'confirmed') {
+                        // オーナー部屋と確定部屋は濃い緑
                         bgColor = "bg-green-600";
                       } else {
+                        // 到達可能部屋は薄い緑
                         bgColor = "bg-green-300";
                       }
                     } else {
