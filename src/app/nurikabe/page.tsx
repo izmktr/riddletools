@@ -385,7 +385,6 @@ class Field {
         cell.type = 'preowner';
         cell.ownerIsland = detachedIsland;
         cell.confirmedOwners = [detachedIsland];
-        detachedIsland.confirmedCells.add(hash);
         cell.reason = "到達部屋リストが1つのため確定(仮オーナー)";
 
         // もし、この部屋が他のオーナー部屋に隣接していなかったら、そのまま仮オーナー部屋として確定
@@ -566,7 +565,7 @@ class Field {
             // 隣接する島が見つからない場合、離れ小島として登録
             const detachedIsland = new Island(this, targetX, targetY, 0);
             detachedIsland.confirmedCells.add(targetHash);
-            detachedIsland.reachableCells.search = (x: number, y: number) => {
+            detachedIsland.confirmedCells.search = (x: number, y: number) => {
               return this.getReachableOwnersPreowner(x, y);
             };
             this.detachedIslands.push(detachedIsland);
@@ -695,6 +694,89 @@ export default function NurikabePage() {
   const [selectedCell, setSelectedCell] = useState<{x: number, y: number} | null>(null);
   const [highlightedCells, setHighlightedCells] = useState<Set<number>>(new Set());
   const [manualWalls, setManualWalls] = useState<Set<number>>(new Set());
+  const [showExport, setShowExport] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [exportText, setExportText] = useState("");
+  const [importText, setImportText] = useState("");
+
+  // エクスポート処理
+  const handleExport = () => {
+    let text = `${width}, ${height}\n`;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const value = board[y][x];
+        if (value !== null && value > 0) {
+          text += `${x + 1} ${y + 1} ${value}\n`;
+        }
+      }
+    }
+    setExportText(text);
+    setShowExport(true);
+  };
+
+  // エクスポートテキストをコピー
+  const handleCopyExport = () => {
+    navigator.clipboard.writeText(exportText);
+    alert("コピーしました！");
+  };
+
+  // インポート処理
+  const handleImport = () => {
+    setImportText("");
+    setShowImport(true);
+  };
+
+  // インポートテキストを適用
+  const handleApplyImport = () => {
+    try {
+      const lines = importText.trim().split('\n');
+      if (lines.length === 0) {
+        alert("テキストが空です");
+        return;
+      }
+
+      // 1行目: width, height
+      const [w, h] = lines[0].split(',').map(s => parseInt(s.trim()));
+      if (isNaN(w) || isNaN(h) || w < 3 || w > 20 || h < 3 || h > 20) {
+        alert("盤面サイズが不正です (3-20の範囲)");
+        return;
+      }
+
+      // 新しい盤面を作成
+      const newBoard: CellValue[][] = Array(h).fill(null).map(() => Array(w).fill(null));
+
+      // 2行目以降: x y num (1-origin)
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const [x, y, num] = line.split(/\s+/).map(s => parseInt(s));
+        if (isNaN(x) || isNaN(y) || isNaN(num)) {
+          alert(`${i + 1}行目が不正です: ${line}`);
+          return;
+        }
+        if (x < 1 || x > w || y < 1 || y > h) {
+          alert(`${i + 1}行目の座標が範囲外です: (${x}, ${y})`);
+          return;
+        }
+        if (num < 1 || num > 99) {
+          alert(`${i + 1}行目の数字が不正です: ${num} (1-99の範囲)`);
+          return;
+        }
+
+        newBoard[y - 1][x - 1] = num;
+      }
+
+      // 盤面を更新
+      setWidth(w);
+      setHeight(h);
+      setBoard(newBoard);
+      setShowImport(false);
+      alert("インポートしました！");
+    } catch (error) {
+      alert("インポートに失敗しました。形式を確認してください。");
+    }
+  };
 
   // 盤面サイズ変更
   const handleSizeChange = () => {
@@ -886,6 +968,64 @@ export default function NurikabePage() {
         </div>
       )}
 
+      {/* エクスポートモーダル */}
+      {showExport && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative">
+            <button
+              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
+              onClick={() => setShowExport(false)}
+            >閉じる</button>
+            <h3 className="text-xl font-bold mb-4">エクスポート</h3>
+            <textarea
+              className="w-full h-64 p-2 border rounded font-mono text-sm"
+              value={exportText}
+              readOnly
+            />
+            <div className="mt-4 flex gap-2">
+              <button
+                className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                onClick={handleCopyExport}
+              >コピー</button>
+              <button
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                onClick={() => setShowExport(false)}
+              >閉じる</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* インポートモーダル */}
+      {showImport && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative">
+            <button
+              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
+              onClick={() => setShowImport(false)}
+            >閉じる</button>
+            <h3 className="text-xl font-bold mb-4">インポート</h3>
+            <p className="text-sm text-gray-600 mb-2">形式: 1行目に「幅, 高さ」、2行目以降に「x y 数字」（座標は1から開始）</p>
+            <textarea
+              className="w-full h-64 p-2 border rounded font-mono text-sm"
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder="例:&#10;7, 7&#10;1 1 2&#10;3 1 3&#10;7 2 4"
+            />
+            <div className="mt-4 flex gap-2">
+              <button
+                className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+                onClick={handleApplyImport}
+              >適用</button>
+              <button
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                onClick={() => setShowImport(false)}
+              >キャンセル</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <h2 className="text-2xl font-bold mb-4">ぬりかべソルバー</h2>
 
       {/* サイズ設定 */}
@@ -934,6 +1074,14 @@ export default function NurikabePage() {
               className="px-4 py-2 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
               onClick={handleSample}
             >サンプル</button>
+            <button
+              className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+              onClick={handleExport}
+            >エクスポート</button>
+            <button
+              className="px-4 py-2 bg-orange-100 text-orange-700 rounded hover:bg-orange-200"
+              onClick={handleImport}
+            >インポート</button>
           </>
         ) : (
           <>
@@ -1030,7 +1178,7 @@ export default function NurikabePage() {
       {/* セル情報表示 */}
       {isAnalyzeMode && selectedCell && field && (
         <div className="mb-4 p-4 border-2 border-gray-300 rounded bg-gray-50">
-          <h3 className="font-semibold mb-2">セル情報 ({selectedCell.x}, {selectedCell.y})</h3>
+          <h3 className="font-semibold mb-2">セル情報 ({selectedCell.x + 1}, {selectedCell.y + 1})</h3>
           {(() => {
             const cell = field.cells[selectedCell.y][selectedCell.x];
             
@@ -1058,7 +1206,7 @@ export default function NurikabePage() {
                   <p><strong>種類：</strong>確定部屋</p>
                   <p><strong>確定オーナー数：</strong>{cell.confirmedOwners.length}</p>
                   <p><strong>オーナー座標：</strong>
-                    {cell.confirmedOwners.map(o => `(${o.x},${o.y})`).join(', ')}
+                    {cell.confirmedOwners.map(o => `(${o.x + 1},${o.y + 1})`).join(', ')}
                   </p>
                   {cell.reason && <p><strong>確定理由：</strong>{cell.reason}</p>}
                 </div>
