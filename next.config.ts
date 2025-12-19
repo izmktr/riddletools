@@ -6,6 +6,14 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
+  // 開発時のソースマップを有効化（デバッグ用）
+  productionBrowserSourceMaps: false,
+  webpack: (config, { dev }) => {
+    if (dev) {
+      config.devtool = 'eval-source-map';
+    }
+    return config;
+  },
 };
 
 export default nextConfig;
