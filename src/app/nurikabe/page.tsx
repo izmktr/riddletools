@@ -50,7 +50,7 @@ class CellGroup{
   constructor() {
     this.cells = new Set<number>();
     this.edgecells = new Set<number>();
-    this.search = (x: number, y: number) => [];
+    this.search = () => [];
   }
 
   add(hash: number) {
@@ -66,7 +66,7 @@ class CellGroup{
   }
 
   //隣接セルの取得
-  getAdjacent(field: Field): Set<number> {
+  getAdjacent(): Set<number> {
     const removeedge = new Set<number>();
     const adjacentCells = new Set<number>();
     for (const hash of this.edgecells) {
@@ -203,7 +203,7 @@ class Field {
   }
 
   // プレオーナー部屋の拡張用
-  getReachableOwnersPreowner(x: number, y: number, island: Island): Position[] {
+  getReachableOwnersPreowner(x: number, y: number): Position[] {
     const adjacents = this.getAdjacentPositions(x, y);
     const positions: Position[] = [];
     for (const adjPos of adjacents) {
@@ -253,12 +253,11 @@ class Field {
   }
 
   // 到達可能な未確定セルを収集
-  collectReachableCells(island: Island, reachable: Set<number>, processed: Set<number>): void {
-    for (const hash of island.reachableCells.getAdjacent(this)) {
+  collectReachableCells(island: Island, cellgroup: CellGroup, reachable: Set<number>, processed: Set<number>): void {
+    for (const hash of cellgroup.getAdjacent()) {
       if (processed.has(hash)) continue;
 
       const adjPos = Position.fromHash(hash);
-      const cell = this.cells[adjPos.y][adjPos.x];
 
       // 未確定マスで、他のオーナーに隣接していない場合
       if (!this.isAdjacentToOtherOwner(adjPos.x, adjPos.y, island)) {
@@ -268,12 +267,9 @@ class Field {
   }
 
   // 到達可能な未確定セルを収集（仮オーナー用）
-  collectReachableCellsPreowner(island: Island, reachable: Set<number>, processed: Set<number>): void {
-    for (const hash of island.reachableCells.getAdjacent(this)) {
+  collectReachableCellsPreowner(cellgroup: CellGroup, reachable: Set<number>, processed: Set<number>): void {
+    for (const hash of cellgroup.getAdjacent()) {
       if (processed.has(hash)) continue;
-
-      const adjPos = Position.fromHash(hash);
-      const cell = this.cells[adjPos.y][adjPos.x];
 
       // 未確定マスで、他のオーナーに隣接していない場合
       reachable.add(hash);
@@ -282,13 +278,12 @@ class Field {
 
   // 到達可能な未確定セルを収集（壁用）
   collectReachableCellsWall(wallGroup: CellGroup, reachable: Set<number>): void {
-    const adjHash = wallGroup.getAdjacent(this);
+    const adjHash = wallGroup.getAdjacent();
 
     if(adjHash.size === 1){
       const hash = Array.from(adjHash)[0];
       const pos = Position.fromHash(hash);
-      const cell = this.cells[pos.y][pos.x];
-      if (cell.type === 'undecided') {
+      if (this.cells[pos.y][pos.x].type === 'undecided') {
         reachable.add(hash);
       }
     }
@@ -335,17 +330,7 @@ class Field {
       const processed = new Set<number>([...island.confirmedCells.cells]);
 
       // 確定マスの隣接を調べる
-      for (const hash of island.confirmedCells.getAdjacent(this)) {
-        if (processed.has(hash)) continue;
-
-        const adjPos = Position.fromHash(hash);
-        const cell = this.cells[adjPos.y][adjPos.x];
-
-        // 未確定マスで、他のオーナーに隣接していない場合
-        if (!this.isAdjacentToOtherOwner(adjPos.x, adjPos.y, island)) {
-          newReachable.add(hash);
-        }
-      }
+      this.collectReachableCells(island, island.confirmedCells, newReachable, processed);
 
       // 到達部屋リストのサイズが1なら確定
       if (newReachable.size === 1) {
@@ -365,7 +350,7 @@ class Field {
       const processed = new Set<number>();
 
       // 隣接セルを調べる
-      this.collectReachableCellsPreowner(detachedIsland, newReachable, processed);
+      this.collectReachableCellsPreowner(detachedIsland.confirmedCells, newReachable, processed);
 
       // 到達部屋リストのサイズが1なら確定
       if (newReachable.size === 1) {
@@ -400,7 +385,7 @@ class Field {
         cell.type = 'preowner';
         cell.ownerIsland = detachedIsland;
         cell.confirmedOwners = [detachedIsland];
-        detachedIsland.reachableCells.add(hash);
+        detachedIsland.confirmedCells.add(hash);
         cell.reason = "到達部屋リストが1つのため確定(仮オーナー)";
 
         // もし、この部屋が他のオーナー部屋に隣接していなかったら、そのまま仮オーナー部屋として確定
@@ -449,7 +434,7 @@ class Field {
       if (this.remainingWalls <= 0) break;
 
       // 隣接セルを調べる
-      const adjHash = wallGroup.getAdjacent(this);
+      const adjHash = wallGroup.getAdjacent();
 
       // 到達部屋リストのサイズが1なら確定
       if (adjHash.size === 1) {
@@ -478,7 +463,7 @@ class Field {
 
       for(let i = 0; i < roomsLeft; i++) {
         const reachableCells = new Set<number>();
-        this.collectReachableCells(island, reachableCells, processed);
+        this.collectReachableCells(island, island.reachableCells, reachableCells, processed);
         reachableCells.forEach(cell => {
           island.reachableCells.add(cell);
           processed.add(cell);
@@ -581,6 +566,9 @@ class Field {
             // 隣接する島が見つからない場合、離れ小島として登録
             const detachedIsland = new Island(this, targetX, targetY, 0);
             detachedIsland.confirmedCells.add(targetHash);
+            detachedIsland.reachableCells.search = (x: number, y: number) => {
+              return this.getReachableOwnersPreowner(x, y);
+            };
             this.detachedIslands.push(detachedIsland);
             targetCell.cell.type = 'preowner';
             targetCell.cell.confirmedOwners = [detachedIsland];
