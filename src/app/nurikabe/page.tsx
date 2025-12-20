@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import { rootCertificates } from "tls";
 
 type CellValue = number | null;
 
@@ -194,7 +195,7 @@ class Field {
     for (const adjPos of adjacents) {
       const cell = this.cells[adjPos.y][adjPos.x];
       if (cell.type === 'undecided' || cell.type === 'preowner') {
-        if (!this.isAdjacentToOtherOwner(adjPos.x, adjPos.y, island)){
+        if (!this.isAdjacentToOtherOwner(adjPos.x, adjPos.y, island, island.roomSize - island.confirmedCells.size())) {
           positions.push(adjPos);
         }
       }
@@ -230,12 +231,20 @@ class Field {
 
   // 指定されたセルが他のオーナーの確定マスに隣接しているかチェック
   // return true: 隣接している、false: 隣接していない
-  isAdjacentToOtherOwner(x: number, y: number, island: Island): boolean {
+  isAdjacentToOtherOwner(x: number, y: number, island: Island, restsize: number): boolean {
     const adjacents = this.getAdjacentPositions(x, y);
     for (const pos of adjacents) {
       const cell = this.cells[pos.y][pos.x];
       if ((cell.type === 'owner' || cell.type === 'confirmed') && cell.ownerIsland !== island) {
         return true;
+      }
+      // 仮オーナーの場合、部屋サイズがオーバーしてないか確認
+      if (cell.type === 'preowner'){
+        if (cell.ownerIsland && restsize <= cell.ownerIsland.confirmedCells.size()){
+          // 自分自身のマスが仮オーナーの場合は除外
+          const mycell = this.cells[y][x];
+          if (mycell.type !== 'preowner') return true;
+        }
       }
     }
     return false;
@@ -253,14 +262,14 @@ class Field {
   }
 
   // 到達可能な未確定セルを収集
-  collectReachableCells(island: Island, cellgroup: CellGroup, reachable: Set<number>, processed: Set<number>): void {
+  collectReachableCells(island: Island, cellgroup: CellGroup, reachable: Set<number>, processed: Set<number>, restsize: number): void {
     for (const hash of cellgroup.getAdjacent()) {
       if (processed.has(hash)) continue;
 
       const adjPos = Position.fromHash(hash);
 
       // 未確定マスで、他のオーナーに隣接していない場合
-      if (!this.isAdjacentToOtherOwner(adjPos.x, adjPos.y, island)) {
+      if (!this.isAdjacentToOtherOwner(adjPos.x, adjPos.y, island, restsize)) {
         reachable.add(hash);
       }
     }
@@ -330,7 +339,8 @@ class Field {
       const processed = new Set<number>([...island.confirmedCells.cells]);
 
       // 確定マスの隣接を調べる
-      this.collectReachableCells(island, island.confirmedCells, newReachable, processed);
+      const restsize = island.roomSize - island.confirmedCells.size();
+      this.collectReachableCells(island, island.confirmedCells, newReachable, processed, restsize);
 
       // 到達部屋リストのサイズが1なら確定
       if (newReachable.size === 1) {
@@ -462,7 +472,7 @@ class Field {
 
       for(let i = 0; i < roomsLeft; i++) {
         const reachableCells = new Set<number>();
-        this.collectReachableCells(island, island.reachableCells, reachableCells, processed);
+        this.collectReachableCells(island, island.reachableCells, reachableCells, processed, roomsLeft - i);
         reachableCells.forEach(cell => {
           island.reachableCells.add(cell);
           processed.add(cell);
@@ -811,9 +821,11 @@ export default function NurikabePage() {
         for (const hash of cell.ownerIsland.reachableCells.cells) {
           highlighted.add(hash);
         }
-      } else if (cell.type === 'preowner') {
-        // 仮オーナー部屋：自身のセルをハイライト
-        highlighted.add(new Position(col, row).toHash());
+      } else if (cell.type === 'preowner' && cell.ownerIsland) {
+        // 仮オーナー部屋：仮オーナーのconfirmedCellsをハイライト
+        for (const hash of cell.ownerIsland.confirmedCells.cells) {
+          highlighted.add(hash);
+        }
       } else if (cell.type === 'confirmed') {
         // 確定部屋：すべての確定オーナーのセルをハイライト
         for (const owner of cell.confirmedOwners) {
@@ -1142,7 +1154,7 @@ export default function NurikabePage() {
                       if (fieldCell.type === 'owner') {
                         bgColor = "bg-yellow-500";
                       } else if (fieldCell.type === 'preowner') {
-                        bgColor = "bg-orange-400";
+                        bgColor = "bg-orange-200";
                       } else if (fieldCell.type === 'confirmed') {
                         bgColor = "bg-yellow-200";
                       } else if (fieldCell.type === 'wall') {
@@ -1197,6 +1209,7 @@ export default function NurikabePage() {
               return (
                 <div>
                   <p><strong>種類：</strong>仮オーナー部屋</p>
+                  <p><strong>確定マス数：</strong>{cell.ownerIsland ? cell.ownerIsland.confirmedCells.size() : 0}</p>
                   {cell.reason && <p><strong>確定理由：</strong>{cell.reason}</p>}
                 </div>
               );
