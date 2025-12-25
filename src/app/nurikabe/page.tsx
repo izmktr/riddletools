@@ -794,12 +794,19 @@ export default function NurikabePage() {
     
     // 既存のデータを可能な範囲でコピー
     for (let row = 0; row < Math.min(height, board.length); row++) {
-      for (let col = 0; col < Math.min(width, board[0].length); col++) {
+      for (let col = 0; col < Math.min(width, board[0]?.length || 0); col++) {
         newBoard[row][col] = board[row][col];
       }
     }
     
     setBoard(newBoard);
+    
+    // 解析結果をリセット
+    setIsAnalyzeMode(false);
+    setField(null);
+    setManualWalls(new Set<number>());
+    setHighlightedCells(new Set<number>());
+    setSelectedCell(null);
   };
 
   // セルクリック時の処理
@@ -1065,8 +1072,9 @@ export default function NurikabePage() {
           />
         </div>
         <button
-          className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+          className={`px-4 py-2 rounded ${isAnalyzeMode ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-blue-100 text-blue-700 hover:bg-blue-200'}`}
           onClick={handleSizeChange}
+          disabled={isAnalyzeMode}
         >サイズ変更</button>
       </div>
 
