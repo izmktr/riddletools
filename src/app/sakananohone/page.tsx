@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 
 export default function SakananohonePage() {
@@ -8,6 +8,7 @@ export default function SakananohonePage() {
   const [showManual, setShowManual] = useState(false);
   const [result, setResult] = useState<string[][] | null>(null);
   const [highlightPositions, setHighlightPositions] = useState<Array<{row: number, col: number}>>([]);
+  const [rowNumberPositions, setRowNumberPositions] = useState<Array<{row: number, col: number}>>([]);
   const [isVertical, setIsVertical] = useState(false);
   const [rowNumberType, setRowNumberType] = useState<"数字" | "ABC" | "あいう" | "いろは">("数字");
 
@@ -20,22 +21,33 @@ export default function SakananohonePage() {
         return oneBasedIndex.toString();
       case "ABC":
         const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        return alphabet[(oneBasedIndex - 1) % alphabet.length];
+        if (oneBasedIndex > alphabet.length) {
+          return ""; // 文字が足りない場合は空欄
+        }
+        return alphabet[oneBasedIndex - 1];
       case "あいう":
         const aiueo = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん";
-        return aiueo[(oneBasedIndex - 1) % aiueo.length];
+        if (oneBasedIndex > aiueo.length) {
+          return ""; // 文字が足りない場合は空欄
+        }
+        return aiueo[oneBasedIndex - 1];
       case "いろは":
         const iroha = "いろはにほへとちりぬるをわかよたれそつねならむうゐのおくやまけふこえてあさきゆめみしゑひも";
-        return iroha[(oneBasedIndex - 1) % iroha.length];
+        if (oneBasedIndex > iroha.length) {
+          return ""; // 文字が足りない場合は空欄
+        }
+        return iroha[oneBasedIndex - 1];
       default:
         return oneBasedIndex.toString();
     }
   };
 
-  // 生成機能
-  const handleGenerate = () => {
+  // リアルタイム生成用のuseEffect
+  useEffect(() => {
     if (!wordList.trim() || !positionList.trim()) {
-      alert("単語リストと読む位置の両方を入力してください");
+      setResult(null);
+      setHighlightPositions([]);
+      setRowNumberPositions([]);
       return;
     }
 
@@ -43,13 +55,16 @@ export default function SakananohonePage() {
     const positions = positionList.split('\n').map(p => p.trim()).filter(p => p);
 
     if (words.length !== positions.length) {
-      alert("単語リストと読む位置の行数が一致しません");
+      setResult(null);
+      setHighlightPositions([]);
       return;
     }
 
     const positionNumbers = positions.map(p => parseInt(p)).filter(n => !isNaN(n));
     if (positionNumbers.length !== positions.length) {
-      alert("読む位置に無効な数値があります");
+      setResult(null);
+      setHighlightPositions([]);
+      setRowNumberPositions([]);
       return;
     }
 
@@ -58,7 +73,7 @@ export default function SakananohonePage() {
     } else {
       generateHorizontalTable(words, positionNumbers);
     }
-  };
+  }, [wordList, positionList, isVertical, rowNumberType]);
 
   // 横書き（従来）の表生成
   const generateHorizontalTable = (words: string[], positionNumbers: number[]) => {
@@ -75,6 +90,7 @@ export default function SakananohonePage() {
     // 表を初期化
     const table: string[][] = Array(tableHeight).fill(null).map(() => Array(tableWidth).fill(''));
     const highlights: Array<{row: number, col: number}> = [];
+    const rowNumPositions: Array<{row: number, col: number}> = [];
 
     // 各行を処理
     words.forEach((word, rowIndex) => {
@@ -83,6 +99,7 @@ export default function SakananohonePage() {
       
       // 行番号を配置
       table[rowIndex][startCol] = convertRowNumber(rowIndex);
+      rowNumPositions.push({row: rowIndex, col: startCol});
       
       // 単語を配置
       for (let i = 0; i < word.length; i++) {
@@ -90,13 +107,14 @@ export default function SakananohonePage() {
       }
       
       // 読む位置に対応する文字をハイライト
-      if (startCol + position < tableWidth && table[rowIndex][startCol + position]) {
+      if (startCol + position < tableWidth) {
         highlights.push({row: rowIndex, col: startCol + position});
       }
     });
 
     setResult(table);
     setHighlightPositions(highlights);
+    setRowNumberPositions(rowNumPositions);
   };
 
   // 縦書きの表生成
@@ -114,6 +132,7 @@ export default function SakananohonePage() {
     // 表を初期化
     const table: string[][] = Array(tableHeight).fill(null).map(() => Array(tableWidth).fill(''));
     const highlights: Array<{row: number, col: number}> = [];
+    const rowNumPositions: Array<{row: number, col: number}> = [];
 
     // 各列を処理（元の行が列になる）
     words.forEach((word, colIndex) => {
@@ -122,6 +141,7 @@ export default function SakananohonePage() {
       
       // 列番号を配置
       table[startRow][colIndex] = convertRowNumber(colIndex);
+      rowNumPositions.push({row: startRow, col: colIndex});
       
       // 単語を縦に配置
       for (let i = 0; i < word.length; i++) {
@@ -129,13 +149,14 @@ export default function SakananohonePage() {
       }
       
       // 読む位置に対応する文字をハイライト
-      if (startRow + position < tableHeight && table[startRow + position][colIndex]) {
+      if (startRow + position < tableHeight) {
         highlights.push({row: startRow + position, col: colIndex});
       }
     });
 
     setResult(table);
     setHighlightPositions(highlights);
+    setRowNumberPositions(rowNumPositions);
   };
 
   // リセット機能
@@ -144,8 +165,7 @@ export default function SakananohonePage() {
     setPositionList("");
     setResult(null);
     setHighlightPositions([]);
-    setIsVertical(false);
-    setRowNumberType("数字");
+    setRowNumberPositions([]);
   };
 
   // サンプル入力
@@ -159,37 +179,25 @@ export default function SakananohonePage() {
     return !table[row][col] || table[row][col] === '';
   };
 
-  // セルが行番号位置かどうかをチェック（位置ベース）
-  const isRowNumberPosition = (table: string[][], row: number, col: number): boolean => {
-    if (isCellEmpty(table, row, col)) return false;
-    
-    if (isVertical) {
-      // 縦書きの場合: 各列の一番上のセル（空でない最初のセル）
-      for (let r = 0; r < table.length; r++) {
-        if (!isCellEmpty(table, r, col)) {
-          return r === row;
-        }
-      }
-    } else {
-      // 横書きの場合: 各行の一番左のセル（空でない最初のセル）
-      for (let c = 0; c < table[row].length; c++) {
-        if (!isCellEmpty(table, row, c)) {
-          return c === col;
-        }
-      }
-    }
-    
-    return false;
+  // セルが行番号位置かどうかをチェック
+  const isRowNumberPosition = (row: number, col: number): boolean => {
+    return rowNumberPositions.some(pos => pos.row === row && pos.col === col);
   };
 
   // セルに枠線が必要かチェック
   const needsBorder = (table: string[][], row: number, col: number) => {
-    if (isCellEmpty(table, row, col)) return false;
-    
     // 行番号位置の場合は枠線を表示しない
-    if (isRowNumberPosition(table, row, col)) {
+    if (isRowNumberPosition(row, col)) {
       return false;
     }
+    
+    // 読む位置のセルは空欄でも枠線を表示
+    if (isHighlighted(row, col)) {
+      return true;
+    }
+    
+    // 通常のセルは空でない場合のみ枠線を表示
+    if (isCellEmpty(table, row, col)) return false;
     
     return true;
   };
@@ -223,8 +231,8 @@ export default function SakananohonePage() {
               <li>読む位置は数値で入力してください（例：1、2、3）。</li>
               <li>「縦書き」チェックボックスをONにすると、単語が縦方向に配置されます。</li>
               <li>行番号の種類を「数字」「ABC」「あいう」「いろは」から選択できます。</li>
-              <li>文字が足りない場合は最初に戻ってループします（A,B,...,Z,A,B...）。</li>
-              <li>「生成」ボタンで魚の骨形の表を作成します。</li>
+              <li>文字が足りない場合は空欄になります。</li>
+              <li>入力内容を変更すると自動的に魚の骨形の表が生成されます。</li>
               <li>読む位置に対応する文字が黄色でハイライトされます。</li>
               <li>「サンプル」ボタンで例のデータを入力できます。</li>
             </ul>
@@ -292,10 +300,6 @@ export default function SakananohonePage() {
         
         <div className="flex gap-2">
           <button
-            className="px-6 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-            onClick={handleGenerate}
-          >生成</button>
-          <button
             className="px-6 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
             onClick={handleReset}
           >リセット</button>
@@ -319,6 +323,7 @@ export default function SakananohonePage() {
                       const isEmpty = isCellEmpty(result, rowIndex, colIndex);
                       const hasBorder = needsBorder(result, rowIndex, colIndex);
                       const highlighted = isHighlighted(rowIndex, colIndex);
+                      const isRowNum = isRowNumberPosition(rowIndex, colIndex);
                       
                       return (
                         <td
@@ -326,7 +331,7 @@ export default function SakananohonePage() {
                           className={`
                             w-8 h-8 text-center text-sm font-mono
                             ${hasBorder ? 'border border-gray-400' : ''}
-                            ${highlighted ? 'bg-yellow-200' : isEmpty ? '' : 'bg-white'}
+                            ${highlighted ? 'bg-yellow-200' : (isEmpty && !isRowNum) ? '' : 'bg-white'}
                           `}
                           style={{
                             minWidth: '32px',
@@ -348,7 +353,7 @@ export default function SakananohonePage() {
       <div className="text-sm text-gray-600">
         <p>※ 黄色でハイライトされた文字が「読む位置」に対応しています</p>
         <p>※ 縦書きモードでは、各単語が縦（列）方向に配置されます</p>
-        <p>※ 行番号は選択した文字種で表示され、文字が足りない場合は最初からループします</p>
+        <p>※ 行番号は選択した文字種で表示され、文字が足りない場合は空欄になります</p>
       </div>
     </main>
   );
