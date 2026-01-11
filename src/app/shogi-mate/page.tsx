@@ -50,9 +50,12 @@ export default function ShogiMatePage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [searchQueue, setSearchQueue] = useState<PriorityQueue | null>(null);
   const [viewMode, setViewMode] = useState(false);
-  const [currentStepIndex, setCurrentStepIndex] = useState(-1);
-  const [moveHistory, setMoveHistory] = useState<MovePiece[]>([]);
   const [initialField, setInitialField] = useState<Field | null>(null);
+  const [rootMoves, setRootMoves] = useState<MovePiece[]>([]);
+  const [currentPath, setCurrentPath] = useState<MovePiece[]>([]);
+  const [solutionPath, setSolutionPath] = useState<MovePiece[] | null>(null);
+  const [selectedPieceInView, setSelectedPieceInView] = useState<Coordinate | PieceType | null>(null);
+  const [selectedDestination, setSelectedDestination] = useState<Coordinate | null>(null);
 
   // 盤面のセルをクリック
   const handleCellClick = (row: number, col: number) => {
@@ -181,28 +184,47 @@ export default function ShogiMatePage() {
     setSelectedCapturedIndex(null);
     setViewMode(false);
     setSolutionSteps([]);
-    setMoveHistory([]);
-    setCurrentStepIndex(-1);
+    setRootMoves([]);
+    setCurrentPath([]);
+    setSolutionPath(null);
+    setSelectedPieceInView(null);
+    setSelectedDestination(null);
   };
 
   // 入力に戻る
   const handleBackToInput = () => {
     setViewMode(false);
-    setCurrentStepIndex(-1);
+    setCurrentPath([]);
+    setSolutionPath(null);
+    setRootMoves([]);
+    setSelectedPieceInView(null);
+    setSelectedDestination(null);
   };
 
   // 前の手に戻る
   const handlePrevStep = () => {
-    if (currentStepIndex > -1) {
-      setCurrentStepIndex(currentStepIndex - 1);
+    if (currentPath.length > 0) {
+      setCurrentPath(currentPath.slice(0, -1));
+      setSelectedPieceInView(null);
+      setSelectedDestination(null);
     }
   };
 
-  // 次の手に進む
+  // 次の手に進む（詰み筋がある場合のみ）
   const handleNextStep = () => {
-    if (currentStepIndex < moveHistory.length - 1) {
-      setCurrentStepIndex(currentStepIndex + 1);
+    if (solutionPath && currentPath.length < solutionPath.length) {
+      const nextMove = solutionPath[currentPath.length];
+      setCurrentPath([...currentPath, nextMove]);
+      setSelectedPieceInView(null);
+      setSelectedDestination(null);
     }
+  };
+
+  // 手を選択
+  const handleSelectMove = (move: MovePiece) => {
+    setCurrentPath([...currentPath, move]);
+    setSelectedPieceInView(null);
+    setSelectedDestination(null);
   };
 
   // エクスポート処理
@@ -287,7 +309,7 @@ export default function ShogiMatePage() {
     
     const timeoutMs = 10000; // 10秒でタイムアウト
     
-    const timeoutPromise = new Promise<{ steps: string[], moves: MovePiece[], initialField: Field }>((_, reject) => {
+    const timeoutPromise = new Promise<{ steps: string[], moves: MovePiece[], initialField: Field, rootMoves: MovePiece[] }>((_, reject) => {
       setTimeout(() => reject(new Error('タイムアウトしました')), timeoutMs);
     });
     
@@ -296,15 +318,19 @@ export default function ShogiMatePage() {
     try {
       const result = await Promise.race([analyzePromise, timeoutPromise]);
       setSolutionSteps(result.steps);
+      setInitialField(result.initialField);
+      setRootMoves(result.rootMoves);
+      
+      // 常にビューモードに移行
+      setViewMode(true);
+      setCurrentPath([]);
+      
       if (result.steps.length > 0) {
-        // 解析成功時、表示モードに切り替え
-        setMoveHistory(result.moves);
-        setInitialField(result.initialField);
-        setViewMode(true);
-        setCurrentStepIndex(-1); // 初期状態
+        // 詰み筋がある場合
+        setSolutionPath(result.moves);
       } else {
         // 答えがない場合
-        setSolutionSteps(['詰みませんでした']);
+        setSolutionPath(null);
       }
     } catch (error) {
       if (error instanceof Error) {
@@ -363,6 +389,7 @@ export default function ShogiMatePage() {
     to: Coordinate;
     change : boolean;
     prevMove : MovePiece | null = null;
+    nextMove : MovePiece [] = [];
     constructor(step: number, piece: PieceType, from: Coordinate | null, to: Coordinate, prevMove: MovePiece | null, change: boolean = false) {
         this.step = step;
         this.piece = piece;
@@ -370,6 +397,9 @@ export default function ShogiMatePage() {
         this.to = to;
         this.change = change;
         this.prevMove = prevMove;
+        if (prevMove) {
+            prevMove.nextMove.push(this);
+        }
     }
 
     IsDrop(): boolean {
@@ -589,7 +619,7 @@ export default function ShogiMatePage() {
                 }
 
                 // 移動したのが敵の王なら位置を更新
-                if (!mv.IsSelfStep() && mv.piece === '王') {
+                if (!mv.IsSelfStep() && (mv.piece === '王' || mv.piece === '玉')) {
                     newField.opponentking.position = mv.to;
                 }
             }
@@ -688,7 +718,7 @@ export default function ShogiMatePage() {
 
 
   // 詰将棋の解析メイン関数（非同期版）
-  const analyzeMateAsync = async (initialBoard: (Piece | null)[][], initialCaptured: PieceType[]): Promise<{ steps: string[], moves: MovePiece[], initialField: Field }> => {
+  const analyzeMateAsync = async (initialBoard: (Piece | null)[][], initialCaptured: PieceType[]): Promise<{ steps: string[], moves: MovePiece[], initialField: Field, rootMoves: MovePiece[] }> => {
     const steps: string[] = [];
     const maxDepth = 9; // 最大探索深さ
 
@@ -751,10 +781,10 @@ export default function ShogiMatePage() {
         moveSequence.forEach(mv => {
             steps.push(formatMove(mv));
         });
-        return { steps, moves: moveSequence, initialField: field };
+        return { steps, moves: moveSequence, initialField: field, rootMoves: attackerMoves };
     }
 
-    return { steps: [], moves: [], initialField: field };
+    return { steps: [], moves: [], initialField: field, rootMoves: attackerMoves };
   };
 
   // 駒の移動先を取得
@@ -1004,13 +1034,13 @@ export default function ShogiMatePage() {
       return board;
     }
     
-    if (currentStepIndex === -1) {
+    if (currentPath.length === 0) {
       return initialField.toBoard();
     }
     
-    // currentStepIndexまでの手を適用
-    const move = moveHistory[currentStepIndex];
-    const field = Field.advanceBaseField(initialField, move);
+    // currentPathの最後の手まで適用
+    const lastMove = currentPath[currentPath.length - 1];
+    const field = Field.advanceBaseField(initialField, lastMove);
     return field.toBoard();
   };
 
@@ -1020,7 +1050,7 @@ export default function ShogiMatePage() {
       return capturedPieces;
     }
     
-    if (currentStepIndex === -1) {
+    if (currentPath.length === 0) {
       const captured: PieceType[] = [];
       initialField.capturedPieces.forEach((count, piece) => {
         for (let i = 0; i < count; i++) {
@@ -1030,9 +1060,9 @@ export default function ShogiMatePage() {
       return captured;
     }
     
-    // currentStepIndexまでの手を適用
-    const move = moveHistory[currentStepIndex];
-    const field = Field.advanceBaseField(initialField, move);
+    // currentPathの最後の手まで適用
+    const lastMove = currentPath[currentPath.length - 1];
+    const field = Field.advanceBaseField(initialField, lastMove);
     const captured: PieceType[] = [];
     field.capturedPieces.forEach((count, piece) => {
       for (let i = 0; i < count; i++) {
@@ -1040,6 +1070,61 @@ export default function ShogiMatePage() {
       }
     });
     return captured;
+  };
+
+  // 現在表示すべき候補手を取得
+  const getCurrentMoves = (): MovePiece[] => {
+    if (!viewMode) return [];
+    
+    if (currentPath.length === 0) {
+      return rootMoves;
+    }
+    
+    const lastMove = currentPath[currentPath.length - 1];
+    return lastMove.nextMove;
+  };
+
+  // 選択した駒に基づいて候補手をフィルタリング
+  const getFilteredMoves = (): MovePiece[] => {
+    const allMoves = getCurrentMoves();
+    
+    if (!selectedPieceInView) {
+      return allMoves;
+    }
+    
+    // 持ち駒が選択されている場合（PieceTypeの場合）
+    if (typeof selectedPieceInView === 'string') {
+      const dropMoves = allMoves.filter(move => 
+        move.IsDrop() && move.piece === selectedPieceInView
+      );
+      
+      // 移動先が選択されている場合、さらに絞り込み
+      if (selectedDestination) {
+        return dropMoves.filter(move =>
+          move.to.row === selectedDestination.row &&
+          move.to.col === selectedDestination.col
+        );
+      }
+      
+      return dropMoves;
+    }
+    
+    // 盤上の駒が選択されている場合（Coordinateの場合）
+    const pieceMoves = allMoves.filter(move => 
+      move.from && 
+      move.from.row === selectedPieceInView.row && 
+      move.from.col === selectedPieceInView.col
+    );
+    
+    // 移動先が選択されている場合、さらに絞り込み（成りと不成の両方を表示）
+    if (selectedDestination) {
+      return pieceMoves.filter(move =>
+        move.to.row === selectedDestination.row &&
+        move.to.col === selectedDestination.col
+      );
+    }
+    
+    return pieceMoves;
   };
 
   // サンプル問題を読み込む
@@ -1102,15 +1187,15 @@ export default function ShogiMatePage() {
             <button
               className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50"
               onClick={handlePrevStep}
-              disabled={currentStepIndex <= -1}
+              disabled={currentPath.length === 0}
             >←</button>
             <span className="px-4 py-2 font-semibold">
-              {currentStepIndex === -1 ? '初期状態' : `${currentStepIndex + 1}手目`}
+              {currentPath.length === 0 ? '初期状態' : `${currentPath.length}手目`}
             </span>
             <button
               className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50"
               onClick={handleNextStep}
-              disabled={currentStepIndex >= moveHistory.length - 1}
+              disabled={!solutionPath || currentPath.length >= solutionPath.length}
             >→</button>
           </>
         )}
@@ -1125,19 +1210,112 @@ export default function ShogiMatePage() {
               <div key={rowIndex} className="flex">
                 {row.map((piece, colIndex) => {
                   const isSelected = selectedCell?.row === rowIndex && selectedCell?.col === colIndex;
+                  
+                  // ビューモードでの処理
+                  let candidateMove: MovePiece | null = null;
+                  let isPieceSelectable = false;
+                  let isSelectedPiece = false;
+                  
+                  if (viewMode) {
+                    const filteredMoves = getFilteredMoves();
+                    
+                    // 選択中の駒かどうか（盤上の駒のみチェック）
+                    isSelectedPiece = selectedPieceInView !== null && 
+                      typeof selectedPieceInView !== 'string' &&
+                      selectedPieceInView.row === rowIndex && 
+                      selectedPieceInView.col === colIndex;
+                    
+                    if (selectedPieceInView) {
+                      // 駒を選択済み：フィルタリングされた移動先を表示
+                      candidateMove = filteredMoves.find(m => m.to.row === rowIndex && m.to.col === colIndex) || null;
+                    } else {
+                      // 駒未選択：移動可能な駒を判定
+                      const allMoves = getCurrentMoves();
+                      isPieceSelectable = piece !== null && allMoves.some(m => 
+                        m.from && m.from.row === rowIndex && m.from.col === colIndex
+                      );
+                    }
+                  }
+                  
                   return (
                     <div
                       key={`${rowIndex}-${colIndex}`}
-                      className={`w-12 h-12 border border-amber-900 flex items-center justify-center text-xl font-bold
-                        ${!viewMode ? 'cursor-pointer' : ''}
-                        ${isSelected && !viewMode ? 'bg-yellow-300' : 'bg-amber-50'}
-                        ${!viewMode && !isSelected ? 'hover:bg-amber-200' : ''}
+                      className={`w-12 h-12 border border-amber-900 flex items-center justify-center text-xl font-bold relative
+                        ${!viewMode ? 'cursor-pointer' : (candidateMove || isPieceSelectable) ? 'cursor-pointer' : ''}
+                        ${isSelected && !viewMode ? 'bg-yellow-300' : 
+                          isSelectedPiece ? 'bg-yellow-300' :
+                          candidateMove ? 'bg-green-200' : 
+                          isPieceSelectable ? 'bg-blue-100' : 'bg-amber-50'}
+                        ${!viewMode && !isSelected ? 'hover:bg-amber-200' : 
+                          candidateMove ? 'hover:bg-green-300' : 
+                          isPieceSelectable ? 'hover:bg-blue-200' : ''}
                         ${piece?.side === 'self' ? 'text-blue-700' : ''}
                         ${piece?.side === 'opponent' ? 'text-red-700' : ''}
                       `}
-                      onClick={() => !viewMode && handleCellClick(rowIndex, colIndex)}
+                      onClick={() => {
+                        if (!viewMode) {
+                          handleCellClick(rowIndex, colIndex);
+                        } else if (candidateMove) {
+                          // 移動先を選択
+                          const destination = new Coordinate(rowIndex, colIndex);
+                          
+                          // この移動先への候補が何個あるかチェック
+                          const currentMoves = selectedPieceInView ? 
+                            getCurrentMoves().filter(m => {
+                              if (typeof selectedPieceInView === 'string') {
+                                return m.IsDrop() && m.piece === selectedPieceInView &&
+                                  m.to.row === destination.row && m.to.col === destination.col;
+                              } else {
+                                return m.from && 
+                                  m.from.row === selectedPieceInView.row && 
+                                  m.from.col === selectedPieceInView.col &&
+                                  m.to.row === destination.row && 
+                                  m.to.col === destination.col;
+                              }
+                            }) : [];
+                          
+                          if (currentMoves.length === 1) {
+                            // 候補が1つなら即座に確定
+                            handleSelectMove(currentMoves[0]);
+                          } else if (currentMoves.length > 1) {
+                            // 候補が複数ある場合（成りと不成）、移動先を選択状態にする
+                            setSelectedDestination(destination);
+                          }
+                        } else if (isPieceSelectable) {
+                          // 駒を選択
+                          setSelectedPieceInView(new Coordinate(rowIndex, colIndex));
+                        }
+                      }}
                     >
                       {renderPiece(piece)}
+                      {candidateMove && (() => {
+                        // この移動先への候補を取得
+                        const destination = new Coordinate(rowIndex, colIndex);
+                        const movesToThisSquare = selectedPieceInView ? 
+                          getCurrentMoves().filter(m => {
+                            if (typeof selectedPieceInView === 'string') {
+                              return m.IsDrop() && m.piece === selectedPieceInView &&
+                                m.to.row === destination.row && m.to.col === destination.col;
+                            } else {
+                              return m.from && 
+                                m.from.row === selectedPieceInView.row && 
+                                m.from.col === selectedPieceInView.col &&
+                                m.to.row === destination.row && 
+                                m.to.col === destination.col;
+                            }
+                          }) : [];
+                        
+                        // 成りのみがあるかチェック
+                        const hasPromotedOnly = movesToThisSquare.length === 1 && 
+                          movesToThisSquare[0].change;
+                        
+                        return (
+                          <span className="absolute top-0 right-0 text-xs bg-red-500 text-white px-1 rounded flex flex-col items-center leading-tight">
+                            <span>{candidateMove.IsDrop() ? '打' : '動'}</span>
+                            {hasPromotedOnly && <span>成</span>}
+                          </span>
+                        );
+                      })()}
                     </div>
                   );
                 })}
@@ -1149,19 +1327,34 @@ export default function ShogiMatePage() {
           <div className="mt-6">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-semibold">持ち駒:</span>
-              {getDisplayCaptured().map((piece, index) => (
-                <div
-                  key={index}
-                  className={`w-12 h-12 border-2 border-blue-700 bg-blue-50 flex items-center justify-center text-xl font-bold text-blue-700
-                    ${!viewMode ? 'cursor-pointer' : ''}
-                    ${selectedCapturedIndex === index && !viewMode ? 'bg-yellow-300 border-yellow-500' : ''}
-                    ${!viewMode && selectedCapturedIndex !== index ? 'hover:bg-blue-100' : ''}
-                  `}
-                  onClick={() => !viewMode && handleCapturedClick(index)}
-                >
-                  {piece}
-                </div>
-              ))}
+              {getDisplayCaptured().map((piece, index) => {
+                // ビューモードでの処理
+                const isSelectedCaptured = viewMode && selectedPieceInView === piece;
+                const allMoves = viewMode ? getCurrentMoves() : [];
+                const isCapturedSelectable = viewMode && allMoves.some(m => m.IsDrop() && m.piece === piece);
+                
+                return (
+                  <div
+                    key={index}
+                    className={`w-12 h-12 border-2 border-blue-700 bg-blue-50 flex items-center justify-center text-xl font-bold text-blue-700
+                      ${viewMode ? (isCapturedSelectable ? 'cursor-pointer' : '') : 'cursor-pointer'}
+                      ${!viewMode && selectedCapturedIndex === index ? 'bg-yellow-300 border-yellow-500' : 
+                        isSelectedCaptured ? 'bg-yellow-300 border-yellow-500' : ''}
+                      ${!viewMode && selectedCapturedIndex !== index ? 'hover:bg-blue-100' : 
+                        isCapturedSelectable ? 'hover:bg-blue-100' : ''}
+                    `}
+                    onClick={() => {
+                      if (!viewMode) {
+                        handleCapturedClick(index);
+                      } else if (isCapturedSelectable) {
+                        setSelectedPieceInView(piece);
+                      }
+                    }}
+                  >
+                    {piece}
+                  </div>
+                );
+              })}
               {/* 空欄 */}
               {!viewMode && (
                 <div
@@ -1259,6 +1452,63 @@ export default function ShogiMatePage() {
               </p>
             </div>
           )}
+        </div>
+        )}
+        
+        {/* ビューモード：候補手リスト */}
+        {viewMode && (
+        <div>
+          <h3 className="font-semibold mb-2">候補手リスト</h3>
+          <div className="space-y-2">
+            {selectedPieceInView && (
+              <button
+                className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 rounded text-sm"
+                onClick={() => {
+                  setSelectedPieceInView(null);
+                  setSelectedDestination(null);
+                }}
+              >
+                駒選択を解除
+              </button>
+            )}
+            {selectedDestination && (
+              <div className="p-2 bg-yellow-50 border border-yellow-200 rounded text-sm">
+                <p className="font-semibold text-yellow-800">
+                  {9 - selectedDestination.col}筋{selectedDestination.row + 1}段への移動
+                </p>
+                <p className="text-xs text-gray-600">成る・成らないを選択してください</p>
+              </div>
+            )}
+            {getFilteredMoves().length > 0 ? (
+              <>
+                <p className="text-sm text-gray-600 mb-2">
+                  {currentPath.length % 2 === 0 ? '攻め方の手' : '守り方の手'} 
+                  ({getFilteredMoves().length}手{selectedPieceInView ? ' / 絞り込み中' : ''})
+                </p>
+                <div className="max-h-96 overflow-y-auto space-y-2">
+                  {getFilteredMoves().map((move, index) => (
+                    <button
+                      key={index}
+                      className="w-full px-3 py-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded text-left text-sm"
+                      onClick={() => handleSelectMove(move)}
+                    >
+                      <div className="font-semibold text-blue-700">
+                        {formatMove(move)}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-gray-500">
+                {selectedPieceInView ? 
+                  (typeof selectedPieceInView === 'string' ? 
+                    `選択した持ち駒（${selectedPieceInView}）の打つ先がありません` : 
+                    '選択した駒の移動先がありません') : 
+                  '候補手がありません'}
+              </p>
+            )}
+          </div>
         </div>
         )}
       </div>
