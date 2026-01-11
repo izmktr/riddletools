@@ -48,6 +48,8 @@ export default function ShogiMatePage() {
   const [importText, setImportText] = useState("");
   const [solutionSteps, setSolutionSteps] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [searchQueue, setSearchQueue] = useState<PriorityQueue | null>(null);
 
   // 盤面のセルをクリック
   const handleCellClick = (row: number, col: number) => {
@@ -246,7 +248,7 @@ export default function ShogiMatePage() {
       setCapturedPieces(newCaptured);
       setShowImport(false);
       alert("インポートしました！");
-    } catch (error) {
+    } catch {
       alert("インポートに失敗しました。形式を確認してください。");
     }
   };
@@ -346,6 +348,86 @@ export default function ShogiMatePage() {
     }
   }
 
+  // 優先度付きキュー（最小ヒープ）
+  class PriorityQueue {
+    private heap: Array<{ priority: number; data: MovePiece }> = [];
+
+    // 要素を追加
+    push(priority: number, data: MovePiece): void {
+      this.heap.push({ priority, data });
+      this.bubbleUp(this.heap.length - 1);
+    }
+
+    // 配列を一括追加（優先度を指定）
+    pushArray(priority: number, moves: MovePiece[]): void {
+      moves.forEach(move => {
+        this.push(priority, move);
+      });
+    }
+
+    // 最小優先度の要素を取り出す
+    pop(): MovePiece | undefined {
+      if (this.heap.length === 0) return undefined;
+      if (this.heap.length === 1) return this.heap.pop()!.data;
+
+      const min = this.heap[0].data;
+      this.heap[0] = this.heap.pop()!;
+      this.bubbleDown(0);
+      return min;
+    }
+
+    // 最小優先度の要素を見る（取り出さない）
+    peek(): MovePiece | undefined {
+      return this.heap.length > 0 ? this.heap[0].data : undefined;
+    }
+
+    // 先頭の要素の優先度を見る
+    peekPriority(): number {
+      return this.heap.length > 0 ? this.heap[0].priority : 0;
+    }
+
+    // 空かどうか
+    isEmpty(): boolean {
+      return this.heap.length === 0;
+    }
+
+    // サイズ
+    size(): number {
+      return this.heap.length;
+    }
+
+    // ヒープの上方向への調整
+    private bubbleUp(index: number): void {
+      while (index > 0) {
+        const parentIndex = Math.floor((index - 1) / 2);
+        if (this.heap[index].priority >= this.heap[parentIndex].priority) break;
+        
+        [this.heap[index], this.heap[parentIndex]] = [this.heap[parentIndex], this.heap[index]];
+        index = parentIndex;
+      }
+    }
+
+    // ヒープの下方向への調整
+    private bubbleDown(index: number): void {
+      while (true) {
+        const leftChild = 2 * index + 1;
+        const rightChild = 2 * index + 2;
+        let smallest = index;
+
+        if (leftChild < this.heap.length && this.heap[leftChild].priority < this.heap[smallest].priority) {
+          smallest = leftChild;
+        }
+        if (rightChild < this.heap.length && this.heap[rightChild].priority < this.heap[smallest].priority) {
+          smallest = rightChild;
+        }
+        if (smallest === index) break;
+
+        [this.heap[index], this.heap[smallest]] = [this.heap[smallest], this.heap[index]];
+        index = smallest;
+      }
+    }
+  }
+
   // フィールドクラス
   class Field{
     opponentking: PiecePosition;
@@ -420,6 +502,9 @@ export default function ShogiMatePage() {
                 );
                 if (fromIndex !== -1) {
                     current[fromIndex].position = mv.to;
+                    if (mv.change){
+                        current[fromIndex].piece = mv.piece;
+                    }
                 }
                 
                 // 移動先に相手の駒がある場合、取る
@@ -533,73 +618,64 @@ export default function ShogiMatePage() {
     return field.toBoard();
   };
 
+
+
+
   // 詰将棋の解析メイン関数
   const analyzeMate = (initialBoard: (Piece | null)[][], initialCaptured: PieceType[]): string[] => {
     const steps: string[] = [];
-    let currentBoard = initialBoard.map(row => [...row]);
-    let currentCaptured = [...initialCaptured];
-    let depth = 0;
-    const maxDepth = 3; // 最大探索深さ
+    const maxDepth = 9; // 最大探索深さ
 
-    const field = Field.fromBoard(currentBoard, currentCaptured);
+    const field = Field.fromBoard(initialBoard, initialCaptured);
+    
+    // 優先度付きキューを作成してstateに保存
+    const queue = new PriorityQueue();
+    setSearchQueue(queue);
 
-    const moveHistory = new Map<number, MovePiece[]>();
+    let computedMove: MovePiece | null = null;
 
-    for(let step = 0; step < maxDepth; step++) {
-        // 詰み探索開始
+    const attackerMoves = generateSelfMoves(field, 0, null);
+    queue.pushArray(0, attackerMoves);
+
+    while(!queue.isEmpty()) {
+        const topPriority = queue.peekPriority();
+        const move = queue.pop();
+        if (!move) break;
+        if (maxDepth <= move.step) {
+            continue;
+        }
+
+        const step = move.step + 1;
         if (step % 2 === 0) {
             // 攻め方を列挙する関数
-            if (step == 0){
-                const attackerMoves = generateSelfMoves(field, step, null);
-                moveHistory.set(step, attackerMoves);
-            }else{
-                const prevMoves = moveHistory.get(step - 1) || [];
-                prevMoves.forEach(prevMove => {
-                    const nextField = Field.advanceField(field, prevMove);
-                    const attackerMoves = generateSelfMoves(field, step, prevMoves[prevMoves.length - 1]);
-                    if(!moveHistory.has(step)){
-                        moveHistory.set(step, attackerMoves);
-                    }else{
-                        const existingMoves = moveHistory.get(step) || [];
-                        existingMoves.push(...attackerMoves);
-                        moveHistory.set(step, existingMoves);
-                    }
-                });
-                if (moveHistory.get(step)?.length === 0){
-                    break;
-                }
-            }
+            const nextField = Field.advanceField(field, move);
+            const attackerMoves = generateSelfMoves(nextField, step, move);
+            queue.pushArray(topPriority + attackerMoves.length, attackerMoves);
         }else{
             // 守り方を列挙する関数
-            const prevMoves = moveHistory.get(step - 1) || [];
-            let computedMove: MovePiece | null = null;
-            prevMoves.forEach(prevMove => {
-                const nextField = Field.advanceField(field, prevMove);
-                const attackerMoves = generateOpponentMoves(nextField, step, prevMove);
-
-                if (attackerMoves.length === 0) {
-                    // 詰みを発見
-                    computedMove = prevMove;
-                    return;
-                }
-                moveHistory.set(step, attackerMoves);
-            });
-
-            if (computedMove) {
-                // 手順を記録
-                const moveSequence: MovePiece[] = [];
-                let movePtr: MovePiece | null = computedMove;
-                while (movePtr) {
-                    moveSequence.push(movePtr);
-                    movePtr = movePtr.prevMove;
-                }
-                moveSequence.reverse();
-               moveSequence.forEach(mv => {
-                    steps.push(formatMove(mv));
-                });
+            const nextField = Field.advanceField(field, move);
+            const attackerMoves = generateOpponentMoves(nextField, step, move);
+            if (attackerMoves.length === 0) {
+                // 詰みを発見
+                computedMove = move;
                 break;
             }
+            queue.pushArray(topPriority + attackerMoves.length, attackerMoves);
         }
+    }
+
+    if (computedMove) {
+        // 手順を記録
+        const moveSequence: MovePiece[] = [];
+        let movePtr: MovePiece | null = computedMove;
+        while (movePtr) {
+            moveSequence.push(movePtr);
+            movePtr = movePtr.prevMove;
+        }
+        moveSequence.reverse();
+        moveSequence.forEach(mv => {
+            steps.push(formatMove(mv));
+        });
     }
 
     return steps;
@@ -741,6 +817,7 @@ export default function ShogiMatePage() {
     field.selfpieces.forEach(pp => {
         if (pp.position) {
             const pieceMoves = getPieceMoves(board, pp.position, pp.piece, 'self');
+            console.log(`自分の${pp.piece} at (${pp.position.row},${pp.position.col})の利き:`, pieceMoves.map(mv => `(${mv.row},${mv.col})`));
             pieceMoves.forEach(move => {
                 attackSquares.add(move.hash());
             });
@@ -769,10 +846,13 @@ export default function ShogiMatePage() {
     });
 
     // 攻撃している駒を取る
-    console.log("攻撃している駒:", attackedPieces.map(ap => `${ap.piece} at (${ap.position?.row},${ap.position?.col})`));
     if (attackedPieces.length == 1) {
         const targetPos = attackedPieces[0].position ?? new Coordinate(0, 0);
         field.opponentpieces.forEach(pp => {
+            //王は逃げる手で考慮済みなので除外
+            if (pp.piece === '王') return;
+
+            // 自分の駒で攻撃している駒を取れるか？
             const pieceMove = getPieceMoves(board, pp.position!, pp.piece, 'opponent' );
             if (pieceMove.some(mv => mv.row === targetPos.row && mv.col === targetPos.col)) {
                 moves.push(new MovePiece(steps, pp.piece, pp.position, targetPos, prevMove));
@@ -811,7 +891,7 @@ export default function ShogiMatePage() {
   // 手を文字列化
   const formatMove = (move: MovePiece): string => {
     if (move.from === null) {
-      return `${move.step + 1}手: 持ち駒を${move.piece}を${9 - move.to.col}${move.to.row + 1}に打つ`;
+      return `${move.step + 1}手: 持ち駒の${move.piece}を${9 - move.to.col}${move.to.row + 1}に打つ`;
     } else if (move.from) {
         if (move.change) {
             return `${move.step + 1}手: ${9 - move.from.col}${move.from.row + 1}の${UNPROMOTED_MAP[move.piece as string]}を${9 - move.to.col}${move.to.row + 1}へ成る`;
@@ -851,7 +931,8 @@ export default function ShogiMatePage() {
         <button
           className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
           onClick={handleAnalyze}
-        >解析</button>
+          disabled={isAnalyzing}
+        >{isAnalyzing ? '解析中...' : '解析'}</button>
         <button
           className="px-4 py-2 bg-red-200 text-red-700 rounded hover:bg-red-300"
           onClick={handleReset}
