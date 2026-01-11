@@ -720,7 +720,7 @@ export default function ShogiMatePage() {
   // 詰将棋の解析メイン関数（非同期版）
   const analyzeMateAsync = async (initialBoard: (Piece | null)[][], initialCaptured: PieceType[]): Promise<{ steps: string[], moves: MovePiece[], initialField: Field, rootMoves: MovePiece[] }> => {
     const steps: string[] = [];
-    const maxDepth = 9; // 最大探索深さ
+    const maxDepth = 15; // 最大探索深さ
 
     const field = Field.fromBoard(initialBoard, initialCaptured);
     
@@ -747,7 +747,6 @@ export default function ShogiMatePage() {
         // 定期的にイベントループに制御を戻す
         if (nodeCount % yieldInterval === 0) {
             await new Promise(resolve => setTimeout(resolve, 0));
-            console.log(`ノード数: ${nodeCount}, キューサイズ: ${queue.size()}`);
         }
 
         const step = move.step + 1;
@@ -761,6 +760,12 @@ export default function ShogiMatePage() {
             const nextField = Field.advanceBaseField(field, move);
             const attackerMoves = generateOpponentMoves(nextField, step, move);
             if (attackerMoves.length === 0) {
+                // 直前の手が打ち歩詰めかチェック
+                if (move && move.piece === '歩' && move.IsDrop()) {
+                    // 打ち歩詰めなので詰みではない
+                    continue;
+                }
+
                 // 詰みを発見
                 computedMove = move;
                 break;
@@ -988,7 +993,7 @@ export default function ShogiMatePage() {
     // 最終的な手の絞り込み（詰んでない手を除外）
     const returnmoves: MovePiece[] = [];
 
-    // それぞれの行動が、詰んでないかを確認(ToDo)
+    // それぞれの行動が、詰んでないかを確認
 
     moves.forEach(move => {
         const nextField = Field.advanceStepField(field, [move]);
