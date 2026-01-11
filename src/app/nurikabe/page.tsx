@@ -1,7 +1,6 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { rootCertificates } from "tls";
 
 type CellValue = number | null;
 
@@ -605,7 +604,6 @@ class Field {
       if (remainingRoomSize <= 0) continue;
 
       // 距離ごとの候補セル数をカウント
-      let totalCandidates = 0;
       const maxDistance = island.reachableCells.getMaxDistance();
 
       // n=1からトータル部屋数まで繰り返す
@@ -814,10 +812,7 @@ class Field {
   }
 
   processDetachedPreislands(): boolean {
-    for (const detachedIsland of this.detachedIslands) {
-      const newReachable = new Set<number>();
-      const processed = new Set<number>();  
-    }
+    // TODO: 実装予定
     return false;
   }
 
@@ -1214,7 +1209,7 @@ export default function NurikabePage() {
       
       // 完成判定
       checkCompletion(newField);
-    } catch (error) {
+    } catch (error: unknown) {
       if (error instanceof ContradictionError) {
         setIsContradiction(true);
         setContradictionReason(error.message);
@@ -1373,7 +1368,7 @@ export default function NurikabePage() {
       
       // 完成判定
       checkCompletion(field);
-    } catch (error) {
+    } catch (error: unknown) {
       if (error instanceof ContradictionError) {
         setIsContradiction(true);
         setContradictionReason(error.message);
