@@ -44,6 +44,57 @@ class Cell {
   }
 }
 
+class ReachableCellsByDistance {
+  cellsByDistance: Map<number, Set<number>>; // 距離ごとのセルのハッシュ値リスト
+  
+  constructor() {
+    this.cellsByDistance = new Map<number, Set<number>>();
+  }
+
+  // 指定した距離のセルを取得
+  getCellsAtDistance(distance: number): Set<number> {
+    return this.cellsByDistance.get(distance) || new Set<number>();
+  }
+
+  // 指定した距離にセルを追加
+  addCellAtDistance(distance: number, hash: number): void {
+    if (!this.cellsByDistance.has(distance)) {
+      this.cellsByDistance.set(distance, new Set<number>());
+    }
+    this.cellsByDistance.get(distance)!.add(hash);
+  }
+
+  // すべてのセルを取得
+  getAllCells(): Set<number> {
+    const allCells = new Set<number>();
+    for (const cells of this.cellsByDistance.values()) {
+      for (const hash of cells) {
+        allCells.add(hash);
+      }
+    }
+    return allCells;
+  }
+
+  // 最大距離を取得
+  getMaxDistance(): number {
+    return Math.max(-1, ...Array.from(this.cellsByDistance.keys()));
+  }
+
+  // セルの総数を取得
+  size(): number {
+    let total = 0;
+    for (const cells of this.cellsByDistance.values()) {
+      total += cells.size;
+    }
+    return total;
+  }
+
+  // クリア
+  clear(): void {
+    this.cellsByDistance.clear();
+  }
+}
+
 class CellGroup{
   cells: Set<number>; // セルのハッシュ値リスト
   edgecells : Set<number>; // エッジセルのハッシュ値リスト
@@ -117,7 +168,8 @@ class Island {
   y: number;
   roomSize: number;  // 部屋サイズ（数字）
   confirmedCells: CellGroup;  // 確定部屋リスト（ハッシュ値）
-  reachableCells: CellGroup;  // 到達部屋リスト（ハッシュ値）
+  detachedConfirmedCells: Island[]; // 離れ小島用のconfirmedCells
+  reachableCells: ReachableCellsByDistance;  // 距離ごとの到達部屋リスト
   isFixed: boolean;  // 確定マスと部屋サイズが同じになったら固定
 
   constructor(field: Field, x: number, y: number, roomSize: number) {
@@ -130,11 +182,9 @@ class Island {
       return field.getReachableOwners(x, y, this);
     };
 
-    this.reachableCells = new CellGroup();
-    this.reachableCells.search = (x: number, y: number) => {
-      return field.getReachableOwners(x, y, this);
-    };
+    this.reachableCells = new ReachableCellsByDistance();
 
+    this.detachedConfirmedCells = [];
     this.isFixed = false;
   }
 }
@@ -310,7 +360,7 @@ class Field {
       const pos = Position.fromHash(hash);
       const adjacents = this.getAdjacentPositions(pos.x, pos.y);
       for (const adjPos of adjacents) {
-        if (this.addWall(adjPos.x, adjPos.y, "オーナー部屋確定による周囲壁確定(" + island.x + "," + island.y + ")")) {
+        if (this.addWall(adjPos.x, adjPos.y, "オーナー部屋確定による周囲壁確定(" + island.x + "," + island.y + ")/(" + pos.x + "," + pos.y + ")")) {
           changed = true;
         }
       }
@@ -332,21 +382,6 @@ class Field {
           changed = true;
         }
         continue;
-      }
-
-      // 到達部屋リストをクリア
-      const newReachable = new Set<number>();
-      const processed = new Set<number>([...island.confirmedCells.cells]);
-
-      // 確定マスの隣接を調べる
-      const restsize = island.roomSize - island.confirmedCells.size();
-      this.collectReachableCells(island, island.confirmedCells, newReachable, processed, restsize);
-
-      // 到達部屋リストのサイズが1なら確定
-      if (newReachable.size === 1) {
-        const hash = Array.from(newReachable)[0];
-        this.confirmCellForIsland(hash, island, "到達部屋リストが1つのため確定");
-        changed = true;
       }
     }
 
@@ -465,16 +500,32 @@ class Field {
       const processed = new Set<number>(island.confirmedCells.cells);
       
       // あと何部屋追加できるか
-      const roomsLeft = island.roomSize - island.confirmedCells.size();
+      const preislandsize = island.detachedConfirmedCells.reduce((sum, di) => sum + di.confirmedCells.size(), 0);
+      const roomsLeft = island.roomSize - island.confirmedCells.size() - preislandsize;
 
       island.reachableCells.clear();
-      island.confirmedCells.cells.forEach(hash => island.reachableCells.add(hash));
+      
+      // 距離0: confirmedCellsのセル
+      island.confirmedCells.cells.forEach(hash => {
+        island.reachableCells.addCellAtDistance(0, hash);
+      });
 
-      for(let i = 0; i < roomsLeft; i++) {
+      // 距離ごとに拡張
+      for(let distance = 1; distance <= roomsLeft; distance++) {
         const reachableCells = new Set<number>();
-        this.collectReachableCells(island, island.reachableCells, reachableCells, processed, roomsLeft - i);
+        const prevDistanceCells = island.reachableCells.getCellsAtDistance(distance - 1);
+        
+        // 前の距離のセルから隣接セルを探索
+        const tempGroup = new CellGroup();
+        tempGroup.cells = new Set(prevDistanceCells);
+        tempGroup.edgecells = new Set(prevDistanceCells);
+        tempGroup.search = (x: number, y: number) => {
+          return this.getReachableOwners(x, y, island);
+        };
+        
+        this.collectReachableCells(island, tempGroup, reachableCells, processed, roomsLeft - distance + 1);
         reachableCells.forEach(cell => {
-          island.reachableCells.add(cell);
+          island.reachableCells.addCellAtDistance(distance, cell);
           processed.add(cell);
         });
       }
@@ -482,7 +533,7 @@ class Field {
       // 到達マスが部屋サイズと同じ場合、固定する
       if (island.reachableCells.size() === island.roomSize) {
         // 到達マスをすべて確定マスに変更
-        for (const hash of island.reachableCells.cells) {
+        for (const hash of island.reachableCells.getAllCells()) {
           if (island.confirmedCells.cells.has(hash)) continue;
           this.confirmCellForIsland(hash, island, "確定マスと到達マスの合計が部屋サイズと同じため確定");
         }
@@ -505,7 +556,7 @@ class Field {
     // オーナー部屋の探索がすべて終わっている場合、オーナー部屋でも到達しないセルを壁確定マスにする
     const allReachable = new Set<number>();
     for (const island of this.islands) {
-      for (const hash of island.reachableCells.cells) {
+      for (const hash of island.reachableCells.getAllCells()) {
         allReachable.add(hash);
       }
       for (const hash of island.confirmedCells.cells) {
@@ -526,6 +577,108 @@ class Field {
     }
 
     return changed;
+  }
+
+  // 壁仮定による確定セル判定処理
+  checkWallAssumption(): boolean {
+    let changed = false;
+
+    for (const island of this.islands) {
+      if (island.isFixed) continue;
+
+      // 残りの部屋数を求める（部屋サイズ - 確定サイズ）
+      const remainingRoomSize = island.roomSize - island.confirmedCells.size();
+      if (remainingRoomSize <= 0) continue;
+
+      // 距離ごとの候補セル数をカウント
+      let totalCandidates = 0;
+      const maxDistance = island.reachableCells.getMaxDistance();
+
+      // n=1からトータル部屋数まで繰り返す
+      for (let n = 1; n <= maxDistance; n++) {
+        // 距離1～nの部屋候補の数を求める
+        let candidatesUpToN = 0;
+        for (let d = 1; d <= n && d <= maxDistance; d++) {
+          candidatesUpToN += island.reachableCells.getCellsAtDistance(d).size;
+        }
+
+        // 候補数がトータル部屋数より多いなら繰り返しを中断
+        if (remainingRoomSize < candidatesUpToN) {
+          break;
+        }
+
+        // 距離nのセルを1つずつ壁として仮定
+        const cellsAtDistanceN = island.reachableCells.getCellsAtDistance(n);
+        
+        for (const assumedWallHash of cellsAtDistanceN) {
+          // この壁を仮定した状態で、残りの到達可能なセルの数を調べる
+          const reachableCount = this.countReachableWithoutCell(island, assumedWallHash);
+
+          // もし到達可能なセル数が残りの部屋数未満なら、このセルは確定セル
+          if (reachableCount < remainingRoomSize) {
+            if (n === 1) {
+              // 距離1なら確定セルとして登録
+              this.confirmCellForIsland(assumedWallHash, island, `壁仮定により確定（距離${n}）`);
+            } else {
+              // 距離2以上なら仮オーナーとして登録
+              const pos = Position.fromHash(assumedWallHash);
+              const detachedIsland = new Island(this, pos.x, pos.y, 0);
+              detachedIsland.confirmedCells.cells.clear();
+              detachedIsland.confirmedCells.edgecells.clear();
+              detachedIsland.confirmedCells.add(assumedWallHash);
+              detachedIsland.confirmedCells.search = (x: number, y: number) => {
+                return this.getReachableOwnersPreowner(x, y);
+              };
+              this.detachedIslands.push(detachedIsland);
+              
+              const cell = this.cells[pos.y][pos.x];
+              cell.type = 'preowner';
+              cell.confirmedOwners = [detachedIsland];
+              cell.ownerIsland = detachedIsland;
+              cell.reason = `壁仮定により確定（距離${n}、仮オーナー）`;
+            }
+            changed = true;
+            return changed; // 1つ確定したら戻る
+          }
+        }
+      }
+    }
+
+    return changed;
+  }
+
+  // 指定したセルを壁と仮定した場合、島から到達可能なセル数をカウント
+  countReachableWithoutCell(island: Island, excludeHash: number): number {
+    const processed = new Set<number>([...island.confirmedCells.cells, excludeHash]);
+    const reachable = new Set<number>();
+
+    // BFSで到達可能なセルを探索
+    const queue: number[] = Array.from(island.confirmedCells.cells);
+
+    while (queue.length > 0) {
+      const currentHash = queue.shift()!;
+      const pos = Position.fromHash(currentHash);
+
+      // 隣接セルをチェック
+      const adjacents = this.getAdjacentPositions(pos.x, pos.y);
+      for (const adjPos of adjacents) {
+        const adjHash = adjPos.toHash();
+        if (processed.has(adjHash)) continue;
+
+        const adjCell = this.cells[adjPos.y][adjPos.x];
+        
+        // 未確定セルで、他のオーナーに隣接していない場合
+        if (adjCell.type === 'undecided' || adjCell.type === 'preowner') {
+          if (!this.isAdjacentToOtherOwner(adjPos.x, adjPos.y, island, island.roomSize - island.confirmedCells.size())) {
+            reachable.add(adjHash);
+            processed.add(adjHash);
+            queue.push(adjHash);
+          }
+        }
+      }
+    }
+
+    return reachable.size;
   }
 
   // 2x2のパターンをチェックし、3つが壁の場合残りを部屋にする
@@ -641,6 +794,15 @@ class Field {
     return false;
   }
 
+  processDetachedPreislands(): boolean {
+    for (const detachedIsland of this.detachedIslands) {
+      const newReachable = new Set<number>();
+      const processed = new Set<number>();  
+    }
+    return false;
+  }
+
+
   // 解析処理のメイン
   analyze(): boolean {
     this.remainingWalls = this.width * this.height - this.islands.reduce((sum, island) => sum + island.roomSize, 0);
@@ -675,6 +837,17 @@ class Field {
       return true;
     }
 
+    // 壁にすると部屋が確定しない場合の処理
+    if (this.checkWallAssumption()) {
+      return true;
+    }
+
+    // オーナーから到達可能な仮オーナー部屋を確定する処理
+    if (this.processDetachedPreislands()) {
+      return true;
+    }
+
+
     return false;
   }
   
@@ -703,6 +876,7 @@ export default function NurikabePage() {
   const [field, setField] = useState<Field | null>(null);
   const [selectedCell, setSelectedCell] = useState<{x: number, y: number} | null>(null);
   const [highlightedCells, setHighlightedCells] = useState<Set<number>>(new Set());
+  const [selectedCellDistances, setSelectedCellDistances] = useState<Map<number, number>>(new Map());
   const [manualWalls, setManualWalls] = useState<Set<number>>(new Set());
   const [showExport, setShowExport] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -806,6 +980,7 @@ export default function NurikabePage() {
     setField(null);
     setManualWalls(new Set<number>());
     setHighlightedCells(new Set<number>());
+    setSelectedCellDistances(new Map());
     setSelectedCell(null);
   };
 
@@ -819,14 +994,21 @@ export default function NurikabePage() {
       
       const cell = field.cells[row][col];
       const highlighted = new Set<number>();
+      const distances = new Map<number, number>();
       
       if (cell.type === 'owner' && cell.ownerIsland) {
         // オーナー部屋：自身と確定部屋リストを濃い緑、到達部屋リストを薄い緑
         for (const hash of cell.ownerIsland.confirmedCells.cells) {
           highlighted.add(hash);
+          distances.set(hash, 0);
         }
-        for (const hash of cell.ownerIsland.reachableCells.cells) {
-          highlighted.add(hash);
+        // 距離ごとに候補マスを追加
+        const maxDistance = cell.ownerIsland.reachableCells.getMaxDistance();
+        for (let d = 1; d <= maxDistance; d++) {
+          for (const hash of cell.ownerIsland.reachableCells.getCellsAtDistance(d)) {
+            highlighted.add(hash);
+            distances.set(hash, d);
+          }
         }
       } else if (cell.type === 'preowner' && cell.ownerIsland) {
         // 仮オーナー部屋：仮オーナーのconfirmedCellsをハイライト
@@ -838,6 +1020,15 @@ export default function NurikabePage() {
         for (const owner of cell.confirmedOwners) {
           for (const hash of owner.confirmedCells.cells) {
             highlighted.add(hash);
+            distances.set(hash, 0);
+          }
+          // 距離ごとに候補マスを追加
+          const maxDistance = owner.reachableCells.getMaxDistance();
+          for (let d = 1; d <= maxDistance; d++) {
+            for (const hash of owner.reachableCells.getCellsAtDistance(d)) {
+              highlighted.add(hash);
+              distances.set(hash, d);
+            }
           }
         }
       } else if (cell.type === 'wall' && cell.wallGroup) {
@@ -851,6 +1042,7 @@ export default function NurikabePage() {
       }
       
       setHighlightedCells(highlighted);
+      setSelectedCellDistances(distances);
     } else {
       // 入力モード：数字入力
       const input = prompt("数字を入力してください (1-99、空白の場合は0またはキャンセル):");
@@ -923,6 +1115,7 @@ export default function NurikabePage() {
     setManualWalls(new Set());
     setSelectedCell(null);
     setHighlightedCells(new Set());
+    setSelectedCellDistances(new Map());
     
     // フィールドを更新
     setField(field);
@@ -934,6 +1127,7 @@ export default function NurikabePage() {
     setField(null);
     setSelectedCell(null);
     setHighlightedCells(new Set());
+    setSelectedCellDistances(new Map());
     setManualWalls(new Set());
   };
 
@@ -1135,10 +1329,10 @@ export default function NurikabePage() {
                 {row.map((cell, colIndex) => {
                   let bgColor = "bg-white hover:bg-gray-100";
                   let textContent: string | number = cell !== null ? cell : "";
+                  const hash = new Position(colIndex, rowIndex).toHash();
                   
                   if (isAnalyzeMode && field) {
                     const fieldCell = field.cells[rowIndex][colIndex];
-                    const hash = new Position(colIndex, rowIndex).toHash();
                     
                     // ハイライト状態をチェック
                     const isHighlighted = highlightedCells.has(hash);
@@ -1179,13 +1373,20 @@ export default function NurikabePage() {
                     }
                   }
                   
+                  const distance = selectedCellDistances.get(hash);
+                  
                   return (
                     <div
                       key={`${rowIndex}-${colIndex}`}
-                      className={`w-10 h-10 border border-gray-300 cursor-pointer flex items-center justify-center text-sm font-bold ${bgColor}`}
+                      className={`w-10 h-10 border border-gray-300 cursor-pointer flex items-center justify-center text-sm font-bold ${bgColor} relative`}
                       onClick={() => handleCellClick(rowIndex, colIndex)}
                     >
                       {textContent}
+                      {distance !== undefined && distance > 0 && (
+                        <span className="absolute bottom-0 right-0 text-[8px] font-normal px-0.5 bg-white bg-opacity-70 rounded-tl">
+                          {distance}
+                        </span>
+                      )}
                     </div>
                   );
                 })}
