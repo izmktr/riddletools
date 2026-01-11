@@ -360,7 +360,7 @@ class Field {
       const pos = Position.fromHash(hash);
       const adjacents = this.getAdjacentPositions(pos.x, pos.y);
       for (const adjPos of adjacents) {
-        if (this.addWall(adjPos.x, adjPos.y, "オーナー部屋確定による周囲壁確定(" + island.x + "," + island.y + ")/(" + pos.x + "," + pos.y + ")")) {
+        if (this.addWall(adjPos.x, adjPos.y, `オーナー部屋確定による周囲壁確定${formatPosition(island.x, island.y)}/${formatPosition(pos.x, pos.y)}`)) {
           changed = true;
         }
       }
@@ -864,6 +864,11 @@ class Field {
     }
   }
 }
+
+// 座標を表示用の文字列に変換する関数（1-originで表示）
+const formatPosition = (x: number, y: number): string => {
+  return `(${x + 1},${y + 1})`;
+};
 
 export default function NurikabePage() {
   const [width, setWidth] = useState(8);
@@ -1524,7 +1529,7 @@ export default function NurikabePage() {
       {/* セル情報表示 */}
       {isAnalyzeMode && selectedCell && field && (
         <div className="mb-4 p-4 border-2 border-gray-300 rounded bg-gray-50">
-          <h3 className="font-semibold mb-2">セル情報 ({selectedCell.x + 1}, {selectedCell.y + 1})</h3>
+          <h3 className="font-semibold mb-2">セル情報 {formatPosition(selectedCell.x, selectedCell.y)}</h3>
           {(() => {
             const cell = field.cells[selectedCell.y][selectedCell.x];
             
@@ -1553,7 +1558,7 @@ export default function NurikabePage() {
                   <p><strong>種類：</strong>確定部屋</p>
                   <p><strong>確定オーナー数：</strong>{cell.confirmedOwners.length}</p>
                   <p><strong>オーナー座標：</strong>
-                    {cell.confirmedOwners.map(o => `(${o.x + 1},${o.y + 1})`).join(', ')}
+                    {cell.confirmedOwners.map(o => formatPosition(o.x, o.y)).join(', ')}
                   </p>
                   {cell.reason && <p><strong>確定理由：</strong>{cell.reason}</p>}
                 </div>
