@@ -48,8 +48,11 @@ export default function ShogiMatePage() {
   const [importText, setImportText] = useState("");
   const [solutionSteps, setSolutionSteps] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [searchQueue, setSearchQueue] = useState<PriorityQueue | null>(null);
+  const [viewMode, setViewMode] = useState(false);
+  const [currentStepIndex, setCurrentStepIndex] = useState(-1);
+  const [moveHistory, setMoveHistory] = useState<MovePiece[]>([]);
+  const [initialField, setInitialField] = useState<Field | null>(null);
 
   // 盤面のセルをクリック
   const handleCellClick = (row: number, col: number) => {
@@ -176,6 +179,30 @@ export default function ShogiMatePage() {
     setSelectedCell(null);
     setCapturedPieces([]);
     setSelectedCapturedIndex(null);
+    setViewMode(false);
+    setSolutionSteps([]);
+    setMoveHistory([]);
+    setCurrentStepIndex(-1);
+  };
+
+  // 入力に戻る
+  const handleBackToInput = () => {
+    setViewMode(false);
+    setCurrentStepIndex(-1);
+  };
+
+  // 前の手に戻る
+  const handlePrevStep = () => {
+    if (currentStepIndex > -1) {
+      setCurrentStepIndex(currentStepIndex - 1);
+    }
+  };
+
+  // 次の手に進む
+  const handleNextStep = () => {
+    if (currentStepIndex < moveHistory.length - 1) {
+      setCurrentStepIndex(currentStepIndex + 1);
+    }
   };
 
   // エクスポート処理
@@ -253,38 +280,55 @@ export default function ShogiMatePage() {
     }
   };
 
-  // 解析処理（仮実装）
-  const handleAnalyze = () => {
+  // 解析処理
+  const handleAnalyze = async () => {
     setIsAnalyzing(true);
     setSolutionSteps([]);
     
     const timeoutMs = 10000; // 10秒でタイムアウト
     
-    // 非同期で解析を実行
-    setTimeout(() => {
-      const timeoutPromise = new Promise<string[]>((_, reject) => {
-        setTimeout(() => reject(new Error('タイムアウトしました')), timeoutMs);
-      });
-      
-      const analyzePromise = new Promise<string[]>((resolve) => {
-        const steps = analyzeMate(board, capturedPieces);
-        resolve(steps);
-      });
-      
-      Promise.race([analyzePromise, timeoutPromise])
-        .then((steps) => {
-          console.log("解析結果:", steps);
-          setSolutionSteps(steps);
-        })
-        .catch((error) => {
-          if (error instanceof Error) {
+    const timeoutPromise = new Promise<{ steps: string[], moves: MovePiece[], initialField: Field }>((_, reject) => {
+      setTimeout(() => reject(new Error('タイムアウトしました')), timeoutMs);
+    });
+    
+    const analyzePromise = analyzeMateAsync(board, capturedPieces);
+    
+    try {
+      const result = await Promise.race([analyzePromise, timeoutPromise]);
+      setSolutionSteps(result.steps);
+      if (result.steps.length > 0) {
+        // 解析成功時、表示モードに切り替え
+        setMoveHistory(result.moves);
+        setInitialField(result.initialField);
+        setViewMode(true);
+        setCurrentStepIndex(-1); // 初期状態
+      } else {
+        // 答えがない場合
+        setSolutionSteps(['詰みませんでした']);
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        // タイムアウト時にqueueの情報を表示
+        setTimeout(() => {
+          if (searchQueue) {
+            const queueSize = searchQueue.size();
+            const firstStep = searchQueue.peek()?.step;
+            const lastStep = searchQueue.getLastStep();
+            
+            const queueInfo = `\n\nキュー情報:\n` +
+              `- サイズ: ${queueSize}\n` +
+              `- 先頭のstep数: ${firstStep ?? 'なし'}\n` +
+              `- 末尾のstep数: ${lastStep ?? 'なし'}`;
+            
+            alert(error.message + queueInfo);
+          } else {
             alert(error.message);
           }
-        })
-        .finally(() => {
-          setIsAnalyzing(false);
-        });
-    }, 100);
+        }, 100);
+      }
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   // 座標クラス
@@ -334,6 +378,17 @@ export default function ShogiMatePage() {
 
     IsSelfStep(): boolean {
         return this.step % 2 === 0;
+    }
+
+    History(): MovePiece[] {
+        const moves: MovePiece[] = [];
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        let current: MovePiece | null = this;
+        while (current) {
+            moves.push(current);
+            current = current.prevMove;
+        }
+        return moves.reverse();
     }
 
   }
@@ -394,6 +449,19 @@ export default function ShogiMatePage() {
     // サイズ
     size(): number {
       return this.heap.length;
+    }
+
+    // 末尾の要素のstep数を取得（最大優先度の要素）
+    getLastStep(): number | undefined {
+      if (this.heap.length === 0) return undefined;
+      // ヒープの末尾要素から最大step数を探す（効率的ではないが、正確）
+      let maxStep = this.heap[0].data.step;
+      for (let i = 1; i < this.heap.length; i++) {
+        if (this.heap[i].data.step > maxStep) {
+          maxStep = this.heap[i].data.step;
+        }
+      }
+      return maxStep;
     }
 
     // ヒープの上方向への調整
@@ -463,19 +531,13 @@ export default function ShogiMatePage() {
       return new Field(newOpponentKing, newOpponentPieces, newSelfPieces, newCapturedPieces);
     }
 
-    // 手を進めたフィールドを作成する
-    static advanceField(field: Field, move: MovePiece): Field {
+    // 手を進める
+    static advanceStepField(field: Field, moveArray: MovePiece[]): Field {
         const newField = field.clone();
-        // MovePieceから履歴をたどる
-        const moveHistory: MovePiece[] = [];
-        let currentMove: MovePiece | null = move;
-        while (currentMove) {
-            moveHistory.push(currentMove);
-            currentMove = currentMove.prevMove;
-        } 
+
         // 手順を逆順に適用
-        for (let i = moveHistory.length - 1; i >= 0; i--) {
-            const mv = moveHistory[i];
+        for (let i = 0; i < moveArray.length; i++) {
+            const mv = moveArray[i];
             
             if (mv.IsDrop()) {
                 // 持ち駒から打つ
@@ -532,8 +594,12 @@ export default function ShogiMatePage() {
                 }
             }
         }
-
         return newField;
+    }
+
+    // 手を進めたフィールドを作成する
+    static advanceBaseField(field: Field, move: MovePiece): Field {
+        return this.advanceStepField(field, move.History());
     }
 
     // boardからFieldオブジェクトを作成
@@ -621,8 +687,8 @@ export default function ShogiMatePage() {
 
 
 
-  // 詰将棋の解析メイン関数
-  const analyzeMate = (initialBoard: (Piece | null)[][], initialCaptured: PieceType[]): string[] => {
+  // 詰将棋の解析メイン関数（非同期版）
+  const analyzeMateAsync = async (initialBoard: (Piece | null)[][], initialCaptured: PieceType[]): Promise<{ steps: string[], moves: MovePiece[], initialField: Field }> => {
     const steps: string[] = [];
     const maxDepth = 9; // 最大探索深さ
 
@@ -633,6 +699,8 @@ export default function ShogiMatePage() {
     setSearchQueue(queue);
 
     let computedMove: MovePiece | null = null;
+    let nodeCount = 0;
+    const yieldInterval = 1000; // 1000ノードごとにイベントループに制御を戻す
 
     const attackerMoves = generateSelfMoves(field, 0, null);
     queue.pushArray(0, attackerMoves);
@@ -645,15 +713,22 @@ export default function ShogiMatePage() {
             continue;
         }
 
+        nodeCount++;
+        // 定期的にイベントループに制御を戻す
+        if (nodeCount % yieldInterval === 0) {
+            await new Promise(resolve => setTimeout(resolve, 0));
+            console.log(`ノード数: ${nodeCount}, キューサイズ: ${queue.size()}`);
+        }
+
         const step = move.step + 1;
         if (step % 2 === 0) {
             // 攻め方を列挙する関数
-            const nextField = Field.advanceField(field, move);
+            const nextField = Field.advanceBaseField(field, move);
             const attackerMoves = generateSelfMoves(nextField, step, move);
             queue.pushArray(topPriority + attackerMoves.length, attackerMoves);
         }else{
             // 守り方を列挙する関数
-            const nextField = Field.advanceField(field, move);
+            const nextField = Field.advanceBaseField(field, move);
             const attackerMoves = generateOpponentMoves(nextField, step, move);
             if (attackerMoves.length === 0) {
                 // 詰みを発見
@@ -676,9 +751,10 @@ export default function ShogiMatePage() {
         moveSequence.forEach(mv => {
             steps.push(formatMove(mv));
         });
+        return { steps, moves: moveSequence, initialField: field };
     }
 
-    return steps;
+    return { steps: [], moves: [], initialField: field };
   };
 
   // 駒の移動先を取得
@@ -817,7 +893,6 @@ export default function ShogiMatePage() {
     field.selfpieces.forEach(pp => {
         if (pp.position) {
             const pieceMoves = getPieceMoves(board, pp.position, pp.piece, 'self');
-            console.log(`自分の${pp.piece} at (${pp.position.row},${pp.position.col})の利き:`, pieceMoves.map(mv => `(${mv.row},${mv.col})`));
             pieceMoves.forEach(move => {
                 attackSquares.add(move.hash());
             });
@@ -837,11 +912,11 @@ export default function ShogiMatePage() {
     });
 
     // 王が逃げる手を考える
-    const kingMoves = getPieceMoves(board, kingpos, '王', 'opponent' );
+    const kingMoves = getPieceMoves(board, kingpos, '玉', 'opponent' );
     kingMoves.forEach(move => {
         // 自分の駒の利きがないマスにのみ逃げられる
         if (!attackSquares.has(move.hash())) {
-            moves.push(new MovePiece(steps, '王', kingpos, move, prevMove));
+            moves.push(new MovePiece(steps, '玉', kingpos, move, prevMove));
         }
     });
 
@@ -850,7 +925,7 @@ export default function ShogiMatePage() {
         const targetPos = attackedPieces[0].position ?? new Coordinate(0, 0);
         field.opponentpieces.forEach(pp => {
             //王は逃げる手で考慮済みなので除外
-            if (pp.piece === '王') return;
+            if (pp.piece === '玉') return;
 
             // 自分の駒で攻撃している駒を取れるか？
             const pieceMove = getPieceMoves(board, pp.position!, pp.piece, 'opponent' );
@@ -880,12 +955,34 @@ export default function ShogiMatePage() {
         }
     }
 
-    console.log("自分の手:", formatMove(prevMove!));
-    console.log("相手の手候補:", moves.map(mv => formatMove(mv)));
+    // 最終的な手の絞り込み（詰んでない手を除外）
+    const returnmoves: MovePiece[] = [];
 
     // それぞれの行動が、詰んでないかを確認(ToDo)
 
-    return moves;
+    moves.forEach(move => {
+        const nextField = Field.advanceStepField(field, [move]);
+        const nextBoard = fieldToBoard(nextField);
+        const kingPos = nextField.opponentking.position ?? new Coordinate(0, 0);
+
+        // 王のマスに移動可能なコマがあるか？
+        const isSafe = nextField.selfpieces.some(pp => {
+            // 自分の駒を確認
+            if (pp.position) {
+                const pieceMoves = getPieceMoves(nextBoard, pp.position, pp.piece, 'self');
+                if (pieceMoves.some(mv => mv.row === kingPos.row && mv.col === kingPos.col)) {
+                    return true;
+                }
+            }
+            return false;
+        });
+        
+        if (!isSafe) {
+            returnmoves.push(move);
+        }
+    });
+
+    return returnmoves;
   }
 
   // 手を文字列化
@@ -901,14 +998,58 @@ export default function ShogiMatePage() {
     return '';
   };
 
+  // 表示用の盤面を取得
+  const getDisplayBoard = (): (Piece | null)[][] => {
+    if (!viewMode || !initialField) {
+      return board;
+    }
+    
+    if (currentStepIndex === -1) {
+      return initialField.toBoard();
+    }
+    
+    // currentStepIndexまでの手を適用
+    const move = moveHistory[currentStepIndex];
+    const field = Field.advanceBaseField(initialField, move);
+    return field.toBoard();
+  };
+
+  // 表示用の持ち駒を取得
+  const getDisplayCaptured = (): PieceType[] => {
+    if (!viewMode || !initialField) {
+      return capturedPieces;
+    }
+    
+    if (currentStepIndex === -1) {
+      const captured: PieceType[] = [];
+      initialField.capturedPieces.forEach((count, piece) => {
+        for (let i = 0; i < count; i++) {
+          captured.push(piece);
+        }
+      });
+      return captured;
+    }
+    
+    // currentStepIndexまでの手を適用
+    const move = moveHistory[currentStepIndex];
+    const field = Field.advanceBaseField(initialField, move);
+    const captured: PieceType[] = [];
+    field.capturedPieces.forEach((count, piece) => {
+      for (let i = 0; i < count; i++) {
+        captured.push(piece);
+      }
+    });
+    return captured;
+  };
+
   // サンプル問題を読み込む
   const handleSample = () => {
     const newBoard: (Piece | null)[][] = Array(9).fill(null).map(() => Array(9).fill(null));
     
     // サンプルデータ
-    newBoard[0][3] = { type: '金', side: 'opponent' }; // 4 1 O 金
+    newBoard[0][3] = { type: '銀', side: 'opponent' }; // 4 1 O 銀
     newBoard[0][4] = { type: '玉', side: 'opponent' }; // 5 1 O 玉
-    newBoard[0][5] = { type: '金', side: 'opponent' }; // 6 1 O 金
+    newBoard[0][5] = { type: '銀', side: 'opponent' }; // 6 1 O 銀
     newBoard[2][4] = { type: '銀', side: 'self' };     // 5 3 S 銀
     newBoard[4][7] = { type: '角', side: 'self' };     // 8 5 S 角
     
@@ -927,48 +1068,74 @@ export default function ShogiMatePage() {
       <h2 className="text-2xl font-bold mb-4">詰将棋ソルバー</h2>
 
       {/* ボタン */}
-      <div className="mb-4 flex gap-2">
-        <button
-          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
-          onClick={handleAnalyze}
-          disabled={isAnalyzing}
-        >{isAnalyzing ? '解析中...' : '解析'}</button>
-        <button
-          className="px-4 py-2 bg-red-200 text-red-700 rounded hover:bg-red-300"
-          onClick={handleReset}
-        >リセット</button>
-        <button
-          className="px-4 py-2 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
-          onClick={handleSample}
-        >サンプル</button>
-        <button
-          className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-          onClick={handleExport}
-        >エクスポート</button>
-        <button
-          className="px-4 py-2 bg-orange-100 text-orange-700 rounded hover:bg-orange-200"
-          onClick={handleImport}
-        >インポート</button>
+      <div className="mb-4 flex gap-2 items-center">
+        {!viewMode ? (
+          <>
+            <button
+              className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+              onClick={handleAnalyze}
+              disabled={isAnalyzing}
+            >{isAnalyzing ? '解析中...' : '解析'}</button>
+            <button
+              className="px-4 py-2 bg-red-200 text-red-700 rounded hover:bg-red-300"
+              onClick={handleReset}
+            >リセット</button>
+            <button
+              className="px-4 py-2 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
+              onClick={handleSample}
+            >サンプル</button>
+            <button
+              className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+              onClick={handleExport}
+            >エクスポート</button>
+            <button
+              className="px-4 py-2 bg-orange-100 text-orange-700 rounded hover:bg-orange-200"
+              onClick={handleImport}
+            >インポート</button>
+          </>
+        ) : (
+          <>
+            <button
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+              onClick={handleBackToInput}
+            >入力に戻る</button>
+            <button
+              className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50"
+              onClick={handlePrevStep}
+              disabled={currentStepIndex <= -1}
+            >←</button>
+            <span className="px-4 py-2 font-semibold">
+              {currentStepIndex === -1 ? '初期状態' : `${currentStepIndex + 1}手目`}
+            </span>
+            <button
+              className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50"
+              onClick={handleNextStep}
+              disabled={currentStepIndex >= moveHistory.length - 1}
+            >→</button>
+          </>
+        )}
       </div>
 
       <div className="flex gap-8">
         {/* 盤面と持ち駒 */}
         <div>
-          <h3 className="font-semibold mb-2">盤面（クリックで選択）</h3>
+          <h3 className="font-semibold mb-2">盤面{viewMode ? '' : '（クリックで選択）'}</h3>
           <div className="inline-block border-4 border-amber-900 bg-amber-100">
-            {board.map((row, rowIndex) => (
+            {getDisplayBoard().map((row, rowIndex) => (
               <div key={rowIndex} className="flex">
                 {row.map((piece, colIndex) => {
                   const isSelected = selectedCell?.row === rowIndex && selectedCell?.col === colIndex;
                   return (
                     <div
                       key={`${rowIndex}-${colIndex}`}
-                      className={`w-12 h-12 border border-amber-900 cursor-pointer flex items-center justify-center text-xl font-bold
-                        ${isSelected ? 'bg-yellow-300' : 'bg-amber-50 hover:bg-amber-200'}
+                      className={`w-12 h-12 border border-amber-900 flex items-center justify-center text-xl font-bold
+                        ${!viewMode ? 'cursor-pointer' : ''}
+                        ${isSelected && !viewMode ? 'bg-yellow-300' : 'bg-amber-50'}
+                        ${!viewMode && !isSelected ? 'hover:bg-amber-200' : ''}
                         ${piece?.side === 'self' ? 'text-blue-700' : ''}
                         ${piece?.side === 'opponent' ? 'text-red-700' : ''}
                       `}
-                      onClick={() => handleCellClick(rowIndex, colIndex)}
+                      onClick={() => !viewMode && handleCellClick(rowIndex, colIndex)}
                     >
                       {renderPiece(piece)}
                     </div>
@@ -982,31 +1149,36 @@ export default function ShogiMatePage() {
           <div className="mt-6">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-semibold">持ち駒:</span>
-              {capturedPieces.map((piece, index) => (
+              {getDisplayCaptured().map((piece, index) => (
                 <div
                   key={index}
-                  className={`w-12 h-12 border-2 border-blue-700 bg-blue-50 cursor-pointer flex items-center justify-center text-xl font-bold text-blue-700
-                    ${selectedCapturedIndex === index ? 'bg-yellow-300 border-yellow-500' : 'hover:bg-blue-100'}
+                  className={`w-12 h-12 border-2 border-blue-700 bg-blue-50 flex items-center justify-center text-xl font-bold text-blue-700
+                    ${!viewMode ? 'cursor-pointer' : ''}
+                    ${selectedCapturedIndex === index && !viewMode ? 'bg-yellow-300 border-yellow-500' : ''}
+                    ${!viewMode && selectedCapturedIndex !== index ? 'hover:bg-blue-100' : ''}
                   `}
-                  onClick={() => handleCapturedClick(index)}
+                  onClick={() => !viewMode && handleCapturedClick(index)}
                 >
                   {piece}
                 </div>
               ))}
               {/* 空欄 */}
-              <div
-                className={`w-12 h-12 border-2 border-dashed border-gray-400 bg-gray-50 cursor-pointer flex items-center justify-center text-xl
-                  ${selectedCapturedIndex === capturedPieces.length ? 'bg-yellow-300 border-yellow-500' : 'hover:bg-gray-100'}
-                `}
-                onClick={() => handleCapturedClick(capturedPieces.length)}
-              >
-                <span className="text-gray-400">+</span>
-              </div>
+              {!viewMode && (
+                <div
+                  className={`w-12 h-12 border-2 border-dashed border-gray-400 bg-gray-50 cursor-pointer flex items-center justify-center text-xl
+                    ${selectedCapturedIndex === capturedPieces.length ? 'bg-yellow-300 border-yellow-500' : 'hover:bg-gray-100'}
+                  `}
+                  onClick={() => handleCapturedClick(capturedPieces.length)}
+                >
+                  <span className="text-gray-400">+</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
         {/* 駒選択パネル */}
+        {!viewMode && (
         <div>
           <h3 className="font-semibold mb-2">駒を選択</h3>
           <div className="space-y-4">
@@ -1088,6 +1260,7 @@ export default function ShogiMatePage() {
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* 解析結果の表示 */}
