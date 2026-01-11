@@ -39,6 +39,10 @@ export default function ShogiMatePage() {
   const [selectedCell, setSelectedCell] = useState<{row: number, col: number} | null>(null);
   const [capturedPieces, setCapturedPieces] = useState<PieceType[]>([]);
   const [selectedCapturedIndex, setSelectedCapturedIndex] = useState<number | null>(null);
+  const [showExport, setShowExport] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [exportText, setExportText] = useState("");
+  const [importText, setImportText] = useState("");
 
   // 盤面のセルをクリック
   const handleCellClick = (row: number, col: number) => {
@@ -167,6 +171,103 @@ export default function ShogiMatePage() {
     setSelectedCapturedIndex(null);
   };
 
+  // エクスポート処理
+  const handleExport = () => {
+    let text = "";
+    // 盤面データ
+    for (let y = 0; y < 9; y++) {
+      for (let x = 0; x < 9; x++) {
+        const piece = board[y][x];
+        if (piece) {
+          const side = piece.side === 'self' ? 'S' : 'O';
+          text += `${x + 1} ${y + 1} ${side} ${piece.type}\n`;
+        }
+      }
+    }
+    // 持ち駒データ
+    if (capturedPieces.length > 0) {
+      text += "CAPTURED: " + capturedPieces.join(",") + "\n";
+    }
+    setExportText(text);
+    setShowExport(true);
+  };
+
+  // エクスポートテキストをコピー
+  const handleCopyExport = () => {
+    navigator.clipboard.writeText(exportText);
+    alert("コピーしました！");
+  };
+
+  // インポート処理
+  const handleImport = () => {
+    setImportText("");
+    setShowImport(true);
+  };
+
+  // インポートテキストを適用
+  const handleApplyImport = () => {
+    try {
+      const lines = importText.trim().split('\n');
+      const newBoard: (Piece | null)[][] = Array(9).fill(null).map(() => Array(9).fill(null));
+      const newCaptured: PieceType[] = [];
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        
+        if (line.startsWith('CAPTURED:')) {
+          const captured = line.substring(9).trim().split(',');
+          captured.forEach(p => {
+            const piece = p.trim() as PieceType;
+            if (piece) newCaptured.push(piece);
+          });
+        } else {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length !== 4) continue;
+          
+          const [x, y, side, pieceType] = parts;
+          const col = parseInt(x) - 1;
+          const row = parseInt(y) - 1;
+          
+          if (col >= 0 && col < 9 && row >= 0 && row < 9) {
+            newBoard[row][col] = {
+              type: pieceType as PieceType,
+              side: side === 'S' ? 'self' : 'opponent'
+            };
+          }
+        }
+      }
+
+      setBoard(newBoard);
+      setCapturedPieces(newCaptured);
+      setShowImport(false);
+      alert("インポートしました！");
+    } catch (error) {
+      alert("インポートに失敗しました。形式を確認してください。");
+    }
+  };
+
+  // 解析処理（仮実装）
+  const handleAnalyze = () => {
+    alert("解析機能は実装中です");
+  };
+
+  // サンプル問題を読み込む
+  const handleSample = () => {
+    const newBoard: (Piece | null)[][] = Array(9).fill(null).map(() => Array(9).fill(null));
+    
+    // サンプルデータ
+    newBoard[0][3] = { type: '金', side: 'opponent' }; // 4 1 O 金
+    newBoard[0][4] = { type: '玉', side: 'opponent' }; // 5 1 O 玉
+    newBoard[0][5] = { type: '金', side: 'opponent' }; // 6 1 O 金
+    newBoard[2][4] = { type: '銀', side: 'self' };     // 5 3 S 銀
+    newBoard[4][7] = { type: '角', side: 'self' };     // 8 5 S 角
+    
+    setBoard(newBoard);
+    setCapturedPieces(['金']);
+    setSelectedCell(null);
+    setSelectedCapturedIndex(null);
+  };
+
   return (
     <main className="max-w-6xl mx-auto p-6">
       <div className="flex items-center mb-4 gap-2">
@@ -174,6 +275,30 @@ export default function ShogiMatePage() {
       </div>
 
       <h2 className="text-2xl font-bold mb-4">詰将棋ソルバー</h2>
+
+      {/* ボタン */}
+      <div className="mb-4 flex gap-2">
+        <button
+          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+          onClick={handleAnalyze}
+        >解析</button>
+        <button
+          className="px-4 py-2 bg-red-200 text-red-700 rounded hover:bg-red-300"
+          onClick={handleReset}
+        >リセット</button>
+        <button
+          className="px-4 py-2 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
+          onClick={handleSample}
+        >サンプル</button>
+        <button
+          className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+          onClick={handleExport}
+        >エクスポート</button>
+        <button
+          className="px-4 py-2 bg-orange-100 text-orange-700 rounded hover:bg-orange-200"
+          onClick={handleImport}
+        >インポート</button>
+      </div>
 
       <div className="flex gap-8">
         {/* 盤面と持ち駒 */}
@@ -319,6 +444,64 @@ export default function ShogiMatePage() {
         <p>※ 相手の駒は赤色（上向き）、自分の駒は青色（下向き）で表示されます</p>
         <p>※ 持ち駒は自分の駒のみ配置できます。空欄（+）をクリックして駒を追加できます</p>
       </div>
+
+      {/* エクスポートモーダル */}
+      {showExport && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative">
+            <button
+              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
+              onClick={() => setShowExport(false)}
+            >閉じる</button>
+            <h3 className="text-xl font-bold mb-4">エクスポート</h3>
+            <textarea
+              className="w-full h-64 p-2 border rounded font-mono text-sm"
+              value={exportText}
+              readOnly
+            />
+            <div className="mt-4 flex gap-2">
+              <button
+                className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                onClick={handleCopyExport}
+              >コピー</button>
+              <button
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                onClick={() => setShowExport(false)}
+              >閉じる</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* インポートモーダル */}
+      {showImport && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative">
+            <button
+              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
+              onClick={() => setShowImport(false)}
+            >閉じる</button>
+            <h3 className="text-xl font-bold mb-4">インポート</h3>
+            <p className="text-sm text-gray-600 mb-2">形式: x y 側(S/O) 駒種類</p>
+            <textarea
+              className="w-full h-64 p-2 border rounded font-mono text-sm"
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder="例:\n1 1 O 香\n5 9 S 王\nCAPTURED: 歩,銀"
+            />
+            <div className="mt-4 flex gap-2">
+              <button
+                className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+                onClick={handleApplyImport}
+              >適用</button>
+              <button
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                onClick={() => setShowImport(false)}
+              >キャンセル</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
