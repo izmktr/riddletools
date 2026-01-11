@@ -873,6 +873,7 @@ export default function NurikabePage() {
   );
   const [showManual, setShowManual] = useState(false);
   const [isAnalyzeMode, setIsAnalyzeMode] = useState(false);
+  const [isCompleted, setIsCompleted] = useState(false);
   const [field, setField] = useState<Field | null>(null);
   const [selectedCell, setSelectedCell] = useState<{x: number, y: number} | null>(null);
   const [highlightedCells, setHighlightedCells] = useState<Set<number>>(new Set());
@@ -1080,6 +1081,30 @@ export default function NurikabePage() {
     newField.solve();
     setField(newField);
     setIsAnalyzeMode(true);
+    
+    // 完成判定
+    checkCompletion(newField);
+  };
+
+  // 完成判定関数
+  const checkCompletion = (field: Field) => {
+    // すべての未確定セルがないかチェック
+    let hasUndecided = false;
+    for (let y = 0; y < field.height; y++) {
+      for (let x = 0; x < field.width; x++) {
+        if (field.cells[y][x].type === 'undecided') {
+          hasUndecided = true;
+          break;
+        }
+      }
+      if (hasUndecided) break;
+    }
+    
+    // すべての島が固定済みかチェック
+    const allIslandsFixed = field.islands.every(island => island.isFixed);
+    
+    // 未確定セルがなく、すべての島が固定済みなら完成
+    setIsCompleted(!hasUndecided && allIslandsFixed);
   };
 
   // 手動壁を追加/削除
@@ -1192,11 +1217,15 @@ export default function NurikabePage() {
     
     // フィールドを更新
     setField(field);
+    
+    // 完成判定
+    checkCompletion(field);
   };
 
   // 入力に戻る
   const handleBackToInput = () => {
     setIsAnalyzeMode(false);
+    setIsCompleted(false);
     setField(null);
     setSelectedCell(null);
     setHighlightedCells(new Set());
@@ -1399,6 +1428,13 @@ export default function NurikabePage() {
           </>
         )}
       </div>
+
+      {/* 完成メッセージ */}
+      {isAnalyzeMode && isCompleted && (
+        <div className="mb-4 p-3 bg-green-100 border-2 border-green-500 rounded text-green-800 font-bold text-center">
+          ✨ 完成しました！ ✨
+        </div>
+      )}
 
       {/* 盤面 */}
       <div className="mb-4">
