@@ -878,6 +878,7 @@ export default function NurikabePage() {
   const [highlightedCells, setHighlightedCells] = useState<Set<number>>(new Set());
   const [selectedCellDistances, setSelectedCellDistances] = useState<Map<number, number>>(new Map());
   const [manualWalls, setManualWalls] = useState<Set<number>>(new Set());
+  const [manualEmptyCells, setManualEmptyCells] = useState<Set<number>>(new Set());
   const [showExport, setShowExport] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [exportText, setExportText] = useState("");
@@ -979,6 +980,7 @@ export default function NurikabePage() {
     setIsAnalyzeMode(false);
     setField(null);
     setManualWalls(new Set<number>());
+    setManualEmptyCells(new Set<number>());
     setHighlightedCells(new Set<number>());
     setSelectedCellDistances(new Map());
     setSelectedCell(null);
@@ -1088,13 +1090,43 @@ export default function NurikabePage() {
     
     const hash = new Position(selectedCell.x, selectedCell.y).toHash();
     const newManualWalls = new Set(manualWalls);
+    const newManualEmptyCells = new Set(manualEmptyCells);
     
     if (newManualWalls.has(hash)) {
       newManualWalls.delete(hash);
     } else {
       newManualWalls.add(hash);
+      // 同じマスが確定マスに指定されていれば削除
+      if (newManualEmptyCells.has(hash)) {
+        newManualEmptyCells.delete(hash);
+      }
     }
     
+    setManualWalls(newManualWalls);
+    setManualEmptyCells(newManualEmptyCells);
+  };
+
+  // 手動確定マスを追加/削除
+  const handleToggleManualEmptyCell = () => {
+    if (!selectedCell || !field) return;
+    const cell = field.cells[selectedCell.y][selectedCell.x];
+    if (cell.type !== 'undecided') return;
+    
+    const hash = new Position(selectedCell.x, selectedCell.y).toHash();
+    const newManualEmptyCells = new Set(manualEmptyCells);
+    const newManualWalls = new Set(manualWalls);
+    
+    if (newManualEmptyCells.has(hash)) {
+      newManualEmptyCells.delete(hash);
+    } else {
+      newManualEmptyCells.add(hash);
+      // 同じマスが壁マスに指定されていれば削除
+      if (newManualWalls.has(hash)) {
+        newManualWalls.delete(hash);
+      }
+    }
+    
+    setManualEmptyCells(newManualEmptyCells);
     setManualWalls(newManualWalls);
   };
 
@@ -1108,11 +1140,52 @@ export default function NurikabePage() {
       field.addWall(pos.x, pos.y, "手動壁による確定");
     }
     
+    // 手動確定マスを追加（2x2壁パターンと同様の処理）
+    for (const hash of manualEmptyCells) {
+      const pos = Position.fromHash(hash);
+      const targetX = pos.x;
+      const targetY = pos.y;
+      
+      // 隣接する確定マスまたはオーナーマスを探す
+      const adjacents = field.getAdjacentPositions(targetX, targetY);
+      let foundIsland: Island | null = null;
+
+      for (const adjPos of adjacents) {
+        const adjCell = field.cells[adjPos.y][adjPos.x];
+        if (adjCell.type === 'owner' && adjCell.ownerIsland) {
+          foundIsland = adjCell.ownerIsland;
+          break;
+        } else if (adjCell.type === 'confirmed' && adjCell.ownerIsland) {
+          foundIsland = adjCell.ownerIsland;
+          break;
+        }
+      }
+
+      // 隣接する島が見つかった場合、その島の確定リストに追加
+      if (foundIsland && !foundIsland.isFixed) {
+        field.confirmCellForIsland(hash, foundIsland, "手動確定マスによる確定");
+      } else {
+        // 隣接する島が見つからない場合、離れ小島として登録
+        const detachedIsland = new Island(field, targetX, targetY, 0);
+        detachedIsland.confirmedCells.add(hash);
+        detachedIsland.confirmedCells.search = (x: number, y: number) => {
+          return field.getReachableOwnersPreowner(x, y);
+        };
+        field.detachedIslands.push(detachedIsland);
+        const cell = field.cells[targetY][targetX];
+        cell.type = 'preowner';
+        cell.confirmedOwners = [detachedIsland];
+        cell.ownerIsland = detachedIsland;
+        cell.reason = "手動確定マスによる確定(離れ小島)";
+      }
+    }
+    
     // 解析を続行
     field.solve();
     
-    // 手動壁をクリア
+    // 手動壁と確定マスをクリア
     setManualWalls(new Set());
+    setManualEmptyCells(new Set());
     setSelectedCell(null);
     setHighlightedCells(new Set());
     setSelectedCellDistances(new Map());
@@ -1129,6 +1202,7 @@ export default function NurikabePage() {
     setHighlightedCells(new Set());
     setSelectedCellDistances(new Map());
     setManualWalls(new Set());
+    setManualEmptyCells(new Set());
   };
 
   // リセット
@@ -1311,9 +1385,16 @@ export default function NurikabePage() {
               {selectedCell && field && field.cells[selectedCell.y][selectedCell.x].type === 'undecided' && manualWalls.has(new Position(selectedCell.x, selectedCell.y).toHash()) ? '壁を削除' : '壁を追加'}
             </button>
             <button
+              className="px-4 py-2 bg-cyan-100 text-cyan-700 rounded hover:bg-cyan-200 disabled:opacity-50"
+              onClick={handleToggleManualEmptyCell}
+              disabled={!selectedCell || !field || field.cells[selectedCell.y][selectedCell.x].type !== 'undecided'}
+            >
+              {selectedCell && field && field.cells[selectedCell.y][selectedCell.x].type === 'undecided' && manualEmptyCells.has(new Position(selectedCell.x, selectedCell.y).toHash()) ? '確定マスを解除' : '確定マスを追加'}
+            </button>
+            <button
               className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:opacity-50"
               onClick={handleReanalyze}
-              disabled={manualWalls.size === 0}
+              disabled={manualWalls.size === 0 && manualEmptyCells.size === 0}
             >再解析</button>
           </>
         )}
@@ -1344,6 +1425,10 @@ export default function NurikabePage() {
                         // 手動壁がハイライトされている場合は暗い灰色
                         bgColor = "bg-gray-700";
                         textContent = "";
+                      } else if (fieldCell.type === 'undecided' && manualEmptyCells.has(hash)) {
+                        // 手動確定マスがハイライトされている場合は明るい青
+                        bgColor = "bg-blue-300";
+                        textContent = "・";
                       } else if (fieldCell.type === 'owner' || fieldCell.type === 'confirmed') {
                         // オーナー部屋と確定部屋は濃い緑
                         bgColor = "bg-green-600";
@@ -1366,6 +1451,10 @@ export default function NurikabePage() {
                         // 手動で追加された壁
                         bgColor = "bg-gray-500";
                         textContent = "";
+                      } else if (fieldCell.type === 'undecided' && manualEmptyCells.has(hash)) {
+                        // 手動で追加された確定マス
+                        bgColor = "bg-blue-100";
+                        textContent = "・";
                       } else {
                         bgColor = "bg-white";
                         textContent = "";
@@ -1443,11 +1532,13 @@ export default function NurikabePage() {
             } else {
               const hash = new Position(selectedCell.x, selectedCell.y).toHash();
               const isManualWall = manualWalls.has(hash);
+              const isManualEmptyCell = manualEmptyCells.has(hash);
               return (
                 <div>
                   <p><strong>種類：</strong>未確定</p>
                   <p><strong>到達オーナー数：</strong>{cell.reachableOwners.length}</p>
                   {isManualWall && <p><strong>状態：</strong>手動壁（灰色）</p>}
+                  {isManualEmptyCell && <p><strong>状態：</strong>手動確定マス（青・）</p>}
                   {cell.reason && <p><strong>確定理由：</strong>{cell.reason}</p>}
                 </div>
               );
