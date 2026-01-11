@@ -5,6 +5,14 @@ import { rootCertificates } from "tls";
 
 type CellValue = number | null;
 
+// 破綻エラークラス
+class ContradictionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ContradictionError';
+  }
+}
+
 class Position {
   x: number;
   y: number;
@@ -447,7 +455,6 @@ class Field {
               ownerIsland = detachedIsland;
               disappearingIsland = adjCell.ownerIsland;
             }
-            
 
             for (const h of disappearingIsland.confirmedCells.cells) {
               // hashからPositionを取得して、そのセルのownerIslandを更新
@@ -488,6 +495,7 @@ class Field {
         return true; // 壁を追加したら処理を終了
       }
     }
+
     return false;
   }
 
@@ -528,6 +536,10 @@ class Field {
           island.reachableCells.addCellAtDistance(distance, cell);
           processed.add(cell);
         });
+      }
+      // 到達部屋のサイズが部屋サイズより小さい場合は矛盾
+      if (island.reachableCells.size() < island.roomSize) {
+        throw new ContradictionError(`到達可能セル矛盾: ${formatPosition(island.x, island.y)}の部屋の到達可能セルが部屋サイズに満たしていません`);
       }
 
       // 到達マスが部屋サイズと同じ場合、固定する
@@ -588,6 +600,8 @@ class Field {
 
       // 残りの部屋数を求める（部屋サイズ - 確定サイズ）
       const remainingRoomSize = island.roomSize - island.confirmedCells.size();
+
+      // 残り部屋サイズが0以下なら次の島へ
       if (remainingRoomSize <= 0) continue;
 
       // 距離ごとの候補セル数をカウント
@@ -697,6 +711,11 @@ class Field {
         // 壁の数をカウント
         const wallCells = cells.filter(c => c.cell.type === 'wall');
         const undecidedCells = cells.filter(c => c.cell.type === 'undecided');
+
+        // 4つとも壁の場合は矛盾
+        if (wallCells.length === 4) {
+          throw new ContradictionError(`2x2の壁マス矛盾: ${formatPosition(x, y)}を含む2x2がすべて壁です`);
+        }
 
         // 3つが壁で、1つが未確定の場合
         if (wallCells.length === 3 && undecidedCells.length === 1) {
@@ -852,8 +871,8 @@ class Field {
   }
   
 
-  // 解析を繰り返し実行
-  solve() {
+  // 解析を繰り返し実行（破綻時は例外をスロー）
+  solve(): void {
     let iteration = 0;
     const maxIterations = this.width * this.height;
     
@@ -862,6 +881,105 @@ class Field {
       if (!changed) break;
       iteration++;
     }
+  }
+
+  // フィールドのディープコピーを作成
+  clone(): Field {
+    const cloned = new Field(this.width, this.height);
+    
+    // セルの状態をコピー
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        const originalCell = this.cells[y][x];
+        const clonedCell = cloned.cells[y][x];
+        clonedCell.type = originalCell.type;
+        clonedCell.reason = originalCell.reason;
+      }
+    }
+    
+    // 島のマッピングを作成（オリジナル島 -> クローン島）
+    const islandMap = new Map<Island, Island>();
+    
+    // 島を再作成
+    for (const originalIsland of this.islands) {
+      const clonedIsland = new Island(cloned, originalIsland.x, originalIsland.y, originalIsland.roomSize);
+      clonedIsland.isFixed = originalIsland.isFixed;
+      
+      // confirmedCellsをコピー
+      clonedIsland.confirmedCells.cells = new Set(originalIsland.confirmedCells.cells);
+      clonedIsland.confirmedCells.edgecells = new Set(originalIsland.confirmedCells.edgecells);
+      
+      // reachableCellsをコピー
+      clonedIsland.reachableCells.cellsByDistance = new Map();
+      for (const [distance, cells] of originalIsland.reachableCells.cellsByDistance) {
+        clonedIsland.reachableCells.cellsByDistance.set(distance, new Set(cells));
+      }
+      
+      cloned.islands.push(clonedIsland);
+      islandMap.set(originalIsland, clonedIsland);
+    }
+    
+    // 離れ小島を再作成
+    const detachedIslandMap = new Map<Island, Island>();
+    for (const originalDetached of this.detachedIslands) {
+      const clonedDetached = new Island(cloned, originalDetached.x, originalDetached.y, originalDetached.roomSize);
+      clonedDetached.confirmedCells.cells = new Set(originalDetached.confirmedCells.cells);
+      clonedDetached.confirmedCells.edgecells = new Set(originalDetached.confirmedCells.edgecells);
+      cloned.detachedIslands.push(clonedDetached);
+      detachedIslandMap.set(originalDetached, clonedDetached);
+    }
+    
+    // セルの参照を更新
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        const originalCell = this.cells[y][x];
+        const clonedCell = cloned.cells[y][x];
+        
+        // ownerIslandの参照を更新
+        if (originalCell.ownerIsland) {
+          clonedCell.ownerIsland = islandMap.get(originalCell.ownerIsland) || detachedIslandMap.get(originalCell.ownerIsland) || null;
+        }
+        
+        // confirmedOwnersの参照を更新
+        clonedCell.confirmedOwners = originalCell.confirmedOwners
+          .map(owner => islandMap.get(owner) || detachedIslandMap.get(owner))
+          .filter((owner): owner is Island => owner !== undefined);
+        
+        // reachableOwnersの参照を更新
+        clonedCell.reachableOwners = originalCell.reachableOwners
+          .map(owner => islandMap.get(owner) || detachedIslandMap.get(owner))
+          .filter((owner): owner is Island => owner !== undefined);
+      }
+    }
+    
+    // 壁グループを再作成
+    const wallGroupMap = new Map<CellGroup, CellGroup>();
+    for (const originalWallGroup of this.wallGroups) {
+      const clonedWallGroup = new CellGroup();
+      clonedWallGroup.cells = new Set(originalWallGroup.cells);
+      clonedWallGroup.edgecells = new Set(originalWallGroup.edgecells);
+      clonedWallGroup.search = (x: number, y: number) => {
+        return cloned.getReachableWall(x, y);
+      };
+      cloned.wallGroups.push(clonedWallGroup);
+      wallGroupMap.set(originalWallGroup, clonedWallGroup);
+    }
+    
+    // セルのwallGroupの参照を更新
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        const originalCell = this.cells[y][x];
+        const clonedCell = cloned.cells[y][x];
+        if (originalCell.wallGroup) {
+          clonedCell.wallGroup = wallGroupMap.get(originalCell.wallGroup) || null;
+        }
+      }
+    }
+    
+    // 残り配置壁をコピー
+    cloned.remainingWalls = this.remainingWalls;
+    
+    return cloned;
   }
 }
 
@@ -879,7 +997,10 @@ export default function NurikabePage() {
   const [showManual, setShowManual] = useState(false);
   const [isAnalyzeMode, setIsAnalyzeMode] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
+  const [isContradiction, setIsContradiction] = useState(false);
+  const [contradictionReason, setContradictionReason] = useState("");
   const [field, setField] = useState<Field | null>(null);
+  const [fieldHistory, setFieldHistory] = useState<Field[]>([]);
   const [selectedCell, setSelectedCell] = useState<{x: number, y: number} | null>(null);
   const [highlightedCells, setHighlightedCells] = useState<Set<number>>(new Set());
   const [selectedCellDistances, setSelectedCellDistances] = useState<Map<number, number>>(new Map());
@@ -1081,14 +1202,35 @@ export default function NurikabePage() {
 
   // 解析実行
   const handleSolve = () => {
-    const newField = new Field(width, height);
-    newField.initFromBoard(board);
-    newField.solve();
-    setField(newField);
-    setIsAnalyzeMode(true);
-    
-    // 完成判定
-    checkCompletion(newField);
+    try {
+      const newField = new Field(width, height);
+      newField.initFromBoard(board);
+      newField.solve();
+      setField(newField);
+      setIsAnalyzeMode(true);
+      setIsContradiction(false);
+      setContradictionReason("");
+      setFieldHistory([]);
+      
+      // 完成判定
+      checkCompletion(newField);
+    } catch (error) {
+      if (error instanceof ContradictionError) {
+        setIsContradiction(true);
+        setContradictionReason(error.message);
+        setIsAnalyzeMode(true);
+        setFieldHistory([]);
+        // 破綻したフィールドも表示用に保存
+        const newField = new Field(width, height);
+        newField.initFromBoard(board);
+        try {
+          newField.solve();
+        } catch {}
+        setField(newField);
+      } else {
+        throw error;
+      }
+    }
   };
 
   // 完成判定関数
@@ -1164,79 +1306,119 @@ export default function NurikabePage() {
   const handleReanalyze = () => {
     if (!field) return;
     
-    // 手動壁を追加
-    for (const hash of manualWalls) {
-      const pos = Position.fromHash(hash);
-      field.addWall(pos.x, pos.y, "手動壁による確定");
-    }
+    // 現在のフィールドのディープコピーを履歴に追加
+    setFieldHistory([...fieldHistory, field.clone()]);
     
-    // 手動確定マスを追加（2x2壁パターンと同様の処理）
-    for (const hash of manualEmptyCells) {
-      const pos = Position.fromHash(hash);
-      const targetX = pos.x;
-      const targetY = pos.y;
+    try {
+      // 手動壁を追加
+      for (const hash of manualWalls) {
+        const pos = Position.fromHash(hash);
+        field.addWall(pos.x, pos.y, "手動壁による確定");
+      }
       
-      // 隣接する確定マスまたはオーナーマスを探す
-      const adjacents = field.getAdjacentPositions(targetX, targetY);
-      let foundIsland: Island | null = null;
+      // 手動確定マスを追加（2x2壁パターンと同様の処理）
+      for (const hash of manualEmptyCells) {
+        const pos = Position.fromHash(hash);
+        const targetX = pos.x;
+        const targetY = pos.y;
+        
+        // 隣接する確定マスまたはオーナーマスを探す
+        const adjacents = field.getAdjacentPositions(targetX, targetY);
+        let foundIsland: Island | null = null;
 
-      for (const adjPos of adjacents) {
-        const adjCell = field.cells[adjPos.y][adjPos.x];
-        if (adjCell.type === 'owner' && adjCell.ownerIsland) {
-          foundIsland = adjCell.ownerIsland;
-          break;
-        } else if (adjCell.type === 'confirmed' && adjCell.ownerIsland) {
-          foundIsland = adjCell.ownerIsland;
-          break;
+        for (const adjPos of adjacents) {
+          const adjCell = field.cells[adjPos.y][adjPos.x];
+          if (adjCell.type === 'owner' && adjCell.ownerIsland) {
+            foundIsland = adjCell.ownerIsland;
+            break;
+          } else if (adjCell.type === 'confirmed' && adjCell.ownerIsland) {
+            foundIsland = adjCell.ownerIsland;
+            break;
+          }
+        }
+
+        // 隣接する島が見つかった場合、その島の確定リストに追加
+        if (foundIsland && !foundIsland.isFixed) {
+          field.confirmCellForIsland(hash, foundIsland, "手動確定マスによる確定");
+        } else {
+          // 隣接する島が見つからない場合、離れ小島として登録
+          const detachedIsland = new Island(field, targetX, targetY, 0);
+          detachedIsland.confirmedCells.add(hash);
+          detachedIsland.confirmedCells.search = (x: number, y: number) => {
+            return field.getReachableOwnersPreowner(x, y);
+          };
+          field.detachedIslands.push(detachedIsland);
+          const cell = field.cells[targetY][targetX];
+          cell.type = 'preowner';
+          cell.confirmedOwners = [detachedIsland];
+          cell.ownerIsland = detachedIsland;
+          cell.reason = "手動確定マスによる確定(離れ小島)";
         }
       }
-
-      // 隣接する島が見つかった場合、その島の確定リストに追加
-      if (foundIsland && !foundIsland.isFixed) {
-        field.confirmCellForIsland(hash, foundIsland, "手動確定マスによる確定");
+      
+      // 解析を続行
+      field.solve();
+      
+      // 手動壁と確定マスをクリア
+      setManualWalls(new Set());
+      setManualEmptyCells(new Set());
+      setSelectedCell(null);
+      setHighlightedCells(new Set());
+      setSelectedCellDistances(new Map());
+      
+      // フィールドを更新
+      setField(field);
+      setIsContradiction(false);
+      setContradictionReason("");
+      
+      // 完成判定
+      checkCompletion(field);
+    } catch (error) {
+      if (error instanceof ContradictionError) {
+        setIsContradiction(true);
+        setContradictionReason(error.message);
+        // 破綻したフィールドも表示用に設定
+        setField(field);
       } else {
-        // 隣接する島が見つからない場合、離れ小島として登録
-        const detachedIsland = new Island(field, targetX, targetY, 0);
-        detachedIsland.confirmedCells.add(hash);
-        detachedIsland.confirmedCells.search = (x: number, y: number) => {
-          return field.getReachableOwnersPreowner(x, y);
-        };
-        field.detachedIslands.push(detachedIsland);
-        const cell = field.cells[targetY][targetX];
-        cell.type = 'preowner';
-        cell.confirmedOwners = [detachedIsland];
-        cell.ownerIsland = detachedIsland;
-        cell.reason = "手動確定マスによる確定(離れ小島)";
+        throw error;
       }
     }
-    
-    // 解析を続行
-    field.solve();
-    
-    // 手動壁と確定マスをクリア
-    setManualWalls(new Set());
-    setManualEmptyCells(new Set());
-    setSelectedCell(null);
-    setHighlightedCells(new Set());
-    setSelectedCellDistances(new Map());
-    
-    // フィールドを更新
-    setField(field);
-    
-    // 完成判定
-    checkCompletion(field);
   };
 
   // 入力に戻る
   const handleBackToInput = () => {
     setIsAnalyzeMode(false);
     setIsCompleted(false);
+    setIsContradiction(false);
+    setContradictionReason("");
     setField(null);
+    setFieldHistory([]);
     setSelectedCell(null);
     setHighlightedCells(new Set());
     setSelectedCellDistances(new Map());
     setManualWalls(new Set());
     setManualEmptyCells(new Set());
+  };
+
+  // １つ前に戻る
+  const handleBackPrevious = () => {
+    if (fieldHistory.length === 0) return;
+    
+    const previousField = fieldHistory[fieldHistory.length - 1];
+    const newHistory = fieldHistory.slice(0, -1);
+    
+    setField(previousField);
+    setFieldHistory(newHistory);
+    setIsContradiction(false);
+    setContradictionReason("");
+    setManualWalls(new Set());
+    setManualEmptyCells(new Set());
+    setSelectedCell(null);
+    setHighlightedCells(new Set());
+    setSelectedCellDistances(new Map());
+    
+    // 完成判定
+    checkCompletion(previousField);
   };
 
   // リセット
@@ -1430,6 +1612,11 @@ export default function NurikabePage() {
               onClick={handleReanalyze}
               disabled={manualWalls.size === 0 && manualEmptyCells.size === 0}
             >再解析</button>
+            <button
+              className="px-4 py-2 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200 disabled:opacity-50"
+              onClick={handleBackPrevious}
+              disabled={fieldHistory.length === 0}
+            >１つ前に戻る</button>
           </>
         )}
       </div>
@@ -1438,6 +1625,13 @@ export default function NurikabePage() {
       {isAnalyzeMode && isCompleted && (
         <div className="mb-4 p-3 bg-green-100 border-2 border-green-500 rounded text-green-800 font-bold text-center">
           ✨ 完成しました！ ✨
+        </div>
+      )}
+
+      {/* 破綻メッセージ */}
+      {isAnalyzeMode && isContradiction && (
+        <div className="mb-4 p-3 bg-red-100 border-2 border-red-500 rounded text-red-800 font-bold text-center">
+          ❌ 破綻しました<br/>{contradictionReason}
         </div>
       )}
 
