@@ -36,6 +36,9 @@ const UNPROMOTED_MAP: {[key: string]: PieceType} = {
 // 遠距離ユニット
 const LONG_RANGE_PIECES: PieceType[] = ['飛', '角', '龍', '馬', '香'];
 
+// 数字を漢数字に変換
+const KANJI_NUMBERS = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+
 export default function ShogiMatePage() {
   const [board, setBoard] = useState<(Piece | null)[][]>(() => 
     Array(9).fill(null).map(() => Array(9).fill(null))
@@ -223,6 +226,21 @@ export default function ShogiMatePage() {
 
   // 手を選択
   const handleSelectMove = (move: MovePiece) => {
+    // リダイレクトがある場合、パスを再構築
+    if (currentPath.length > 0) {
+      const lastMove = currentPath[currentPath.length - 1];
+      if (lastMove.redirectMove) {
+        // リダイレクト先の履歴を取得
+        const redirectedHistory = lastMove.redirectMove.History();
+        // 現在のパスの最後を除いた部分 + リダイレクト先の履歴 + 新しい手
+        const newPath = [...currentPath.slice(0, -1), ...redirectedHistory, move];
+        setCurrentPath(newPath);
+        setSelectedPieceInView(null);
+        setSelectedDestination(null);
+        return;
+      }
+    }
+    
     setCurrentPath([...currentPath, move]);
     setSelectedPieceInView(null);
     setSelectedDestination(null);
@@ -388,6 +406,7 @@ export default function ShogiMatePage() {
     prevMove : MovePiece | null = null;
     nextMove : MovePiece [] = [];
     status: Status = 'none';
+    redirectMove : MovePiece | null = null;
     constructor(step: number, piece: PieceType, from: Coordinate | null, to: Coordinate, prevMove: MovePiece | null, change: boolean = false) {
         this.step = step;
         this.piece = piece;
@@ -715,7 +734,7 @@ export default function ShogiMatePage() {
   };
 
   // Fieldをハッシュ文字列に変換（トランスポジション検出用）
-  const hashField = (field: Field): string => {
+  const hashField = (field: Field, side: string): string => {
     // 自分の駒を位置でソートして文字列化
     const selfPieces = field.selfpieces
       .filter(pp => pp.position)
@@ -736,7 +755,7 @@ export default function ShogiMatePage() {
       .map(([piece, count]) => `${piece}:${count}`)
       .join(',');
     
-    return `S${selfPieces}O${opponentPieces}C${captured}`;
+    return `S${selfPieces}O${opponentPieces}C${captured}{${side}}`;
   };
 
   // 成功判定処理
@@ -813,7 +832,7 @@ export default function ShogiMatePage() {
     queue.pushArray(0, attackerMoves);
 
     // トランスポジション（同一局面）検出用
-    const visitedFields = new Set<string>();
+    const visitedFields = new Map<string, MovePiece>(); // ハッシュ → 最初のMovePiece
 
     while(!queue.isEmpty()) {
         // タイムアウトチェック
@@ -854,12 +873,17 @@ export default function ShogiMatePage() {
             const nextField = Field.advanceBaseField(field, move);
 
             // トランスポジション検出（同一盤面をスキップ）
-            const fieldHash = hashField(nextField);
+            const fieldHash = hashField(nextField, "s");
             if (visitedFields.has(fieldHash)) {
+                // 既に探索済みの盤面 - リダイレクト設定
+                const firstMove = visitedFields.get(fieldHash);
+                if (firstMove) {
+                    move.redirectMove = firstMove;
+                }
                 hashcount++;
-                continue; // 既に探索済みの盤面
+                continue;
             }
-            visitedFields.add(fieldHash);
+            visitedFields.set(fieldHash, move);
 
             // 駒数チェック：全滅 or 手持ちなし＋駒1枚で負け
             if (nextField.selfpieces.length == 0 || nextField.selfpieces.length + nextField.capturedPieces.size < 2) {
@@ -886,12 +910,17 @@ export default function ShogiMatePage() {
             const nextField = Field.advanceBaseField(field, move);
 
             // トランスポジション検出（同一盤面をスキップ）
-            const fieldHash = hashField(nextField);
+            const fieldHash = hashField(nextField, "o");
             if (visitedFields.has(fieldHash)) {
+                // 既に探索済みの盤面 - リダイレクト設定
+                const firstMove = visitedFields.get(fieldHash);
+                if (firstMove) {
+                    move.redirectMove = firstMove;
+                }
                 hashcount++;
-                continue; // 既に探索済みの盤面
+                continue;
             }
-            visitedFields.add(fieldHash);
+            visitedFields.set(fieldHash, move);
 
             const attackerMoves = generateOpponentMoves(nextField, step, move);
             if (attackerMoves.length === 0) {
@@ -1160,16 +1189,16 @@ export default function ShogiMatePage() {
   }
 
   // 手を文字列化
-  const formatMove = (move: MovePiece): string => {
-    const str = move.status ? move.status != 'none' ?`【${move.status === 'success' ? '成功' : '失敗'}】` : '' : '';
+  const formatMove = (move: MovePiece, success: boolean = false): string => {
+    const str = (success && move.status) ? move.status != 'none' ?`【${move.status === 'success' ? '成功' : '失敗'}】` : '' : '';
 
     if (move.from === null) {
-      return `${move.step + 1}手: 持ち駒の${move.piece}を${9 - move.to.col}${move.to.row + 1}に打つ` + str;
+      return `${move.step + 1}手: 持ち駒の${move.piece}を${9 - move.to.col}${KANJI_NUMBERS[move.to.row + 1]}に打つ` + str;
     } else if (move.from) {
         if (move.change) {
-            return `${move.step + 1}手: ${9 - move.from.col}${move.from.row + 1}の${UNPROMOTED_MAP[move.piece as string]}を${9 - move.to.col}${move.to.row + 1}へ成る` + str;
+            return `${move.step + 1}手: ${9 - move.from.col}${KANJI_NUMBERS[move.from.row + 1]}の${UNPROMOTED_MAP[move.piece as string]}を${9 - move.to.col}${KANJI_NUMBERS[move.to.row + 1]}へ成る` + str;
         }
-        return `${move.step + 1}手: ${9 - move.from.col}${move.from.row + 1}の${move.piece}を${9 - move.to.col}${move.to.row + 1}へ` + str;
+        return `${move.step + 1}手: ${9 - move.from.col}${KANJI_NUMBERS[move.from.row + 1]}の${move.piece}を${9 - move.to.col}${KANJI_NUMBERS[move.to.row + 1]}へ` + str;
     }
     return '';
   };
@@ -1227,6 +1256,12 @@ export default function ShogiMatePage() {
     }
     
     const lastMove = currentPath[currentPath.length - 1];
+    
+    // リダイレクトがある場合、リダイレクト先の手を返す
+    if (lastMove.redirectMove) {
+      return lastMove.redirectMove.nextMove;
+    }
+    
     return lastMove.nextMove;
   };
 
@@ -1370,7 +1405,19 @@ export default function ShogiMatePage() {
         {/* 盤面と持ち駒 */}
         <div>
           <h3 className="font-semibold mb-2">盤面{viewMode ? '' : '（クリックで選択）'}</h3>
-          <div className="inline-block border-4 border-amber-900 bg-amber-100">
+          <div className="inline-block">
+            {/* 列番号（上） */}
+            <div className="flex">
+              <div className="w-6"></div> {/* 左上の空白 */}
+              {[9, 8, 7, 6, 5, 4, 3, 2, 1].map(col => (
+                <div key={col} className="w-12 text-center text-sm font-semibold">{col}</div>
+              ))}
+            </div>
+            {/* 盤面 */}
+            <div className="flex">
+              {/* 行番号（右） */}
+              <div className="w-6"></div> {/* 左側の空白 */}
+              <div className="border-4 border-amber-900 bg-amber-100">
             {getDisplayBoard().map((row, rowIndex) => (
               <div key={rowIndex} className="flex">
                 {row.map((piece, colIndex) => {
@@ -1502,6 +1549,16 @@ export default function ShogiMatePage() {
                 })}
               </div>
             ))}
+          </div>
+              {/* 行番号（右側） */}
+              <div className="ml-1">
+                {[0, 1, 2, 3, 4, 5, 6, 7, 8].map(row => (
+                  <div key={row} className="h-12 flex items-center text-sm font-semibold">
+                    {KANJI_NUMBERS[row + 1]}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* 持ち駒欄 */}
@@ -1674,7 +1731,7 @@ export default function ShogiMatePage() {
                       onClick={() => handleSelectMove(move)}
                     >
                       <div className="font-semibold text-blue-700">
-                        {formatMove(move)}
+                        {formatMove(move, true)}
                       </div>
                     </button>
                   ))}
