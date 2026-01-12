@@ -4,6 +4,7 @@ import Link from "next/link";
 
 type PieceType = '歩' | '香' | '桂' | '銀' | '金' | '王' | '玉' | '飛' | '角' | 'と' | '成香' | '成桂' | '成銀' | '龍' | '馬' | null;
 type Side = 'self' | 'opponent' | null;
+type Status = 'none' | 'success' | 'failure';
 
 interface Piece {
   type: PieceType;
@@ -308,15 +309,17 @@ export default function ShogiMatePage() {
     setSolutionSteps([]);
     
     const timeoutMs = 10000; // 10秒でタイムアウト
+    const abortController = new AbortController();
     
-    const timeoutPromise = new Promise<{ steps: string[], moves: MovePiece[], initialField: Field, rootMoves: MovePiece[] }>((_, reject) => {
-      setTimeout(() => reject(new Error('タイムアウトしました')), timeoutMs);
-    });
-    
-    const analyzePromise = analyzeMateAsync(board, capturedPieces);
+    // タイムアウトタイマーを設定
+    const timeoutId = setTimeout(() => {
+      abortController.abort();
+    }, timeoutMs);
     
     try {
-      const result = await Promise.race([analyzePromise, timeoutPromise]);
+      const result = await analyzeMateAsync(board, capturedPieces, abortController.signal);
+      clearTimeout(timeoutId);
+      
       setSolutionSteps(result.steps);
       setInitialField(result.initialField);
       setRootMoves(result.rootMoves);
@@ -328,29 +331,23 @@ export default function ShogiMatePage() {
       if (result.steps.length > 0) {
         // 詰み筋がある場合
         setSolutionPath(result.moves);
+        alert(`詰み発見！ ${result.steps.length}手詰`);
+      } else if (result.timedOut) {
+        // タイムアウトした場合
+        setSolutionPath(null);
+        const queueInfo = `タイムアウトしました\n\n` +
+          `探索した手数: 最大${result.maxStepReached ?? 0}手目まで\n` +
+          `残りキューサイズ: ${result.queueSize ?? 0}\n\n` +
+          `※ 現在の解析状態をビューモードで確認できます`;
+        alert(queueInfo);
       } else {
         // 答えがない場合
         setSolutionPath(null);
+        alert('詰みが見つかりませんでした');
       }
     } catch (error) {
       if (error instanceof Error) {
-        // タイムアウト時にqueueの情報を表示
-        setTimeout(() => {
-          if (searchQueue) {
-            const queueSize = searchQueue.size();
-            const firstStep = searchQueue.peek()?.step;
-            const lastStep = searchQueue.getLastStep();
-            
-            const queueInfo = `\n\nキュー情報:\n` +
-              `- サイズ: ${queueSize}\n` +
-              `- 先頭のstep数: ${firstStep ?? 'なし'}\n` +
-              `- 末尾のstep数: ${lastStep ?? 'なし'}`;
-            
-            alert(error.message + queueInfo);
-          } else {
-            alert(error.message);
-          }
-        }, 100);
+        alert('エラーが発生しました: ' + error.message);
       }
     } finally {
       setIsAnalyzing(false);
@@ -390,6 +387,7 @@ export default function ShogiMatePage() {
     change : boolean;
     prevMove : MovePiece | null = null;
     nextMove : MovePiece [] = [];
+    status: Status = 'none';
     constructor(step: number, piece: PieceType, from: Coordinate | null, to: Coordinate, prevMove: MovePiece | null, change: boolean = false) {
         this.step = step;
         this.piece = piece;
@@ -714,11 +712,58 @@ export default function ShogiMatePage() {
     return field.toBoard();
   };
 
+  // 成功判定処理
+  function setSuccess(move: MovePiece): boolean {
+    // この処理は、自分の手番か確認
+    if (!move.IsSelfStep()) {
+        throw new Error('setSuccessは自分の手番で呼び出す必要があります');
+    }
+
+    move.status = 'success';
+    if (move.prevMove){
+        move.prevMove.status = 'success';
+        // 直前の手のすべての選択肢が成功かチェック
+        const allSiblingsSuccess = move.prevMove.nextMove.every(mv => mv.status === 'success');
+        if (allSiblingsSuccess) {
+            // さらにその前の手がなければ、成功を返す
+            if (move.prevMove.prevMove){
+                return setSuccess(move.prevMove.prevMove);
+            }else{
+                return true;
+            }
+        }
+        return false;
+    }else{
+        return true;
+    }
+  }
+
+  // 失敗判定処理（相手のすべての手が失敗したか確認）
+  function checkAllOpponentMovesExplored(move: MovePiece): boolean {
+    // 相手の手番のすべての選択肢が探索済みか確認
+    if (!move.nextMove || move.nextMove.length === 0) {
+      return false; // まだ生成されていない
+    }
+    // すべての子が失敗か確認
+    return move.nextMove.every(m => m.status === 'failure');
+  }
 
 
 
   // 詰将棋の解析メイン関数（非同期版）
-  const analyzeMateAsync = async (initialBoard: (Piece | null)[][], initialCaptured: PieceType[]): Promise<{ steps: string[], moves: MovePiece[], initialField: Field, rootMoves: MovePiece[] }> => {
+  const analyzeMateAsync = async (
+    initialBoard: (Piece | null)[][], 
+    initialCaptured: PieceType[], 
+    abortSignal?: AbortSignal
+  ): Promise<{ 
+    steps: string[], 
+    moves: MovePiece[], 
+    initialField: Field, 
+    rootMoves: MovePiece[],
+    timedOut?: boolean,
+    queueSize?: number,
+    maxStepReached?: number
+  }> => {
     const steps: string[] = [];
     const maxDepth = 15; // 最大探索深さ
 
@@ -730,13 +775,28 @@ export default function ShogiMatePage() {
 
     let computedMove: MovePiece | null = null;
     let nodeCount = 0;
+    let maxStepReached = 0;
     const yieldInterval = 1000; // 1000ノードごとにイベントループに制御を戻す
 
     const attackerMoves = generateSelfMoves(field, 0, null);
     queue.pushArray(0, attackerMoves);
 
     while(!queue.isEmpty()) {
-        const topPriority = queue.peekPriority();
+        // タイムアウトチェック
+        if (abortSignal?.aborted) {
+            console.log('タイムアウトにより探索を中断しました');
+            // タイムアウト時も部分結果を返す
+            return { 
+              steps: [], 
+              moves: [], 
+              initialField: field, 
+              rootMoves: attackerMoves,
+              timedOut: true,
+              queueSize: queue.size(),
+              maxStepReached
+            };
+        }
+
         const move = queue.pop();
         if (!move) break;
         if (maxDepth <= move.step) {
@@ -744,6 +804,7 @@ export default function ShogiMatePage() {
         }
 
         nodeCount++;
+        maxStepReached = Math.max(maxStepReached, move.step);
         // 定期的にイベントループに制御を戻す
         if (nodeCount % yieldInterval === 0) {
             await new Promise(resolve => setTimeout(resolve, 0));
@@ -751,26 +812,54 @@ export default function ShogiMatePage() {
 
         const step = move.step + 1;
         if (step % 2 === 0) {
+            // 攻め方の手番
+            // 前回の自分の手が失敗していたらスキップ
+            if (move.prevMove && move.prevMove.status === 'failure') continue;
+
             // 攻め方を列挙する関数
             const nextField = Field.advanceBaseField(field, move);
+
+            // 駒数チェック：全滅 or 手持ちなし＋駒1枚で負け
+            if (nextField.selfpieces.length == 0 || nextField.selfpieces.length + nextField.capturedPieces.size < 2) {
+                if (move.prevMove) {
+                    move.prevMove.status = 'failure';
+                }
+                continue;
+            }
             const attackerMoves = generateSelfMoves(nextField, step, move);
-            queue.pushArray(topPriority + attackerMoves.length, attackerMoves);
+            if (attackerMoves.length === 0) {
+                // 攻め手がないので負け確定
+                if (move.prevMove) {
+                    move.prevMove.status = 'failure';
+                }
+                continue;
+            }
+
+            queue.pushArray(step, attackerMoves);
         }else{
-            // 守り方を列挙する関数
+            // 守り方の手番
+            // 前回の相手の手が成功していたらスキップ
+            if (move.prevMove && move.prevMove.status === 'success') continue;
+
             const nextField = Field.advanceBaseField(field, move);
             const attackerMoves = generateOpponentMoves(nextField, step, move);
             if (attackerMoves.length === 0) {
                 // 直前の手が打ち歩詰めかチェック
                 if (move && move.piece === '歩' && move.IsDrop()) {
                     // 打ち歩詰めなので詰みではない
+                    move.status = 'failure';
                     continue;
                 }
 
                 // 詰みを発見
-                computedMove = move;
-                break;
+                const result = setSuccess(move);
+
+                if (result) {
+                    computedMove = move;
+                    break;
+                }
             }
-            queue.pushArray(topPriority + attackerMoves.length, attackerMoves);
+            queue.pushArray(step, attackerMoves);
         }
     }
 
@@ -793,7 +882,7 @@ export default function ShogiMatePage() {
   };
 
   // 駒の移動先を取得
-  const getPieceMoves = (board: (Piece | null)[][], pos : Coordinate, pieceType : PieceType, side : Side = 'self'): Coordinate[] => {
+  const getPieceMoves = (board: (Piece | null)[][], pos : Coordinate, pieceType : PieceType, side : Side = 'self', ranpage :boolean = false): Coordinate[] => {
     const moves: Coordinate[] = [];
     const directions = getPieceDirections(pieceType, side);
     
@@ -804,8 +893,10 @@ export default function ShogiMatePage() {
         
         if (newRow < 0 || newRow >= 9 || newCol < 0 || newCol >= 9) break;
         
+        
         const target = board[newRow][newCol];
-        if (target && target.side === side) break;
+        // ranpageがtrueの場合、自分の駒にも移動できる
+        if (target && target.side === side && !ranpage) break;
         
         moves.push(new Coordinate(newRow, newCol));
         
@@ -852,6 +943,26 @@ export default function ShogiMatePage() {
     }
   };
 
+  // 王が詰んでいないかチェック（守り方の手の有効性確認）
+  const isKingSafe = (field: Field, move: MovePiece): boolean => {
+    const nextField = Field.advanceStepField(field, [move]);
+    const nextBoard = fieldToBoard(nextField);
+    const kingPos = nextField.opponentking.position ?? new Coordinate(0, 0);
+
+    // 王のマスに移動可能なコマがあるか？
+    return nextField.selfpieces.some(pp => {
+      // 自分の駒を確認
+      if (pp.position) {
+        const pieceMoves = getPieceMoves(nextBoard, pp.position, pp.piece, 'self');
+
+        if (pieceMoves.some(mv => mv.row === kingPos.row && mv.col === kingPos.col)) {
+          return true;
+        }
+      }
+      return false;
+    });
+  };
+
   // 駒の移動可能な位置を生成
   const generateSelfMoves = (field: Field, steps : number, prevMove: MovePiece | null): MovePiece[] => {
     const moves: MovePiece[] = [];
@@ -866,7 +977,7 @@ export default function ShogiMatePage() {
             // 自分の駒の移動範囲を取得
             const pieceMoves = getPieceMoves(board, pos, pp.piece, 'self');
             // 王手の範囲を取得
-            const kingMoveList = getPieceMoves(board, kingpos, pp.piece, 'opponent');
+            const kingMoveList = getPieceMoves(board, kingpos, pp.piece, 'opponent', true);
             // この2つが重なった場所が王手の範囲
             pieceMoves.forEach(move => {
                 if (kingMoveList.some(km => km.row === move.row && km.col === move.col)) {
@@ -927,7 +1038,7 @@ export default function ShogiMatePage() {
     const attackSquares = new Set<number>();
     field.selfpieces.forEach(pp => {
         if (pp.position) {
-            const pieceMoves = getPieceMoves(board, pp.position, pp.piece, 'self');
+            const pieceMoves = getPieceMoves(board, pp.position, pp.piece, 'self', true);
             pieceMoves.forEach(move => {
                 attackSquares.add(move.hash());
             });
@@ -936,8 +1047,8 @@ export default function ShogiMatePage() {
             if (pieceMoves.some(mv => mv.row === kingpos.row && mv.col === kingpos.col)) {
                 attackedPieces.push(pp);
                 // 遠距離ユニットの場合は別に記録
-                if (pp.piece && pp.piece in LONG_RANGE_PIECES) {
-                // 王に隣接していない
+                if (pp.piece && LONG_RANGE_PIECES.includes(pp.piece)) {
+                    // 王に隣接していない
                     if (Math.abs(pp.position.row - kingpos.row) > 1 || Math.abs(pp.position.col - kingpos.col) > 1){
                         longrangePieces.push(pp);
                     }
@@ -971,8 +1082,8 @@ export default function ShogiMatePage() {
     }
 
     // 合駒を打つ
-    if (attackedPieces.length == 1) {
-        const attackedPos = attackedPieces[0].position;
+    if (attackedPieces.length == 1 && longrangePieces.length == 1) {
+        const attackedPos = longrangePieces[0].position;
         // 王と攻撃されている駒の間のマスに歩を打つ
         const xstep = Math.sign(attackedPos!.col - kingpos.col);
         const ystep = Math.sign(attackedPos!.row - kingpos.row);
@@ -990,45 +1101,20 @@ export default function ShogiMatePage() {
         }
     }
 
-    // 最終的な手の絞り込み（詰んでない手を除外）
-    const returnmoves: MovePiece[] = [];
-
-    // それぞれの行動が、詰んでないかを確認
-
-    moves.forEach(move => {
-        const nextField = Field.advanceStepField(field, [move]);
-        const nextBoard = fieldToBoard(nextField);
-        const kingPos = nextField.opponentking.position ?? new Coordinate(0, 0);
-
-        // 王のマスに移動可能なコマがあるか？
-        const isSafe = nextField.selfpieces.some(pp => {
-            // 自分の駒を確認
-            if (pp.position) {
-                const pieceMoves = getPieceMoves(nextBoard, pp.position, pp.piece, 'self');
-                if (pieceMoves.some(mv => mv.row === kingPos.row && mv.col === kingPos.col)) {
-                    return true;
-                }
-            }
-            return false;
-        });
-        
-        if (!isSafe) {
-            returnmoves.push(move);
-        }
-    });
-
-    return returnmoves;
+    return moves;
   }
 
   // 手を文字列化
   const formatMove = (move: MovePiece): string => {
+    const str = move.status ? move.status != 'none' ?`【${move.status === 'success' ? '成功' : '失敗'}】` : '' : '';
+
     if (move.from === null) {
-      return `${move.step + 1}手: 持ち駒の${move.piece}を${9 - move.to.col}${move.to.row + 1}に打つ`;
+      return `${move.step + 1}手: 持ち駒の${move.piece}を${9 - move.to.col}${move.to.row + 1}に打つ` + str;
     } else if (move.from) {
         if (move.change) {
-            return `${move.step + 1}手: ${9 - move.from.col}${move.from.row + 1}の${UNPROMOTED_MAP[move.piece as string]}を${9 - move.to.col}${move.to.row + 1}へ成る`;
+            return `${move.step + 1}手: ${9 - move.from.col}${move.from.row + 1}の${UNPROMOTED_MAP[move.piece as string]}を${9 - move.to.col}${move.to.row + 1}へ成る` + str;
         }
-        return `${move.step + 1}手: ${9 - move.from.col}${move.from.row + 1}の${move.piece}を${9 - move.to.col}${move.to.row + 1}へ`;
+        return `${move.step + 1}手: ${9 - move.from.col}${move.from.row + 1}の${move.piece}を${9 - move.to.col}${move.to.row + 1}へ` + str;
     }
     return '';
   };
@@ -1596,3 +1682,4 @@ export default function ShogiMatePage() {
     </main>
   );
 }
+
