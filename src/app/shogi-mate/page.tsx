@@ -167,16 +167,19 @@ export default function ShogiMatePage() {
   const renderPiece = (piece: Piece | null) => {
     if (!piece) return '';
     
+    // 成り駒かどうか判定
+    const isPromoted = piece.type in UNPROMOTED_MAP;
+    
     // 相手の駒は180度回転
     if (piece.side === 'opponent') {
       return (
-        <span className="inline-block" style={{transform: 'rotate(180deg)'}}>
+        <span className={`inline-block ${isPromoted ? 'underline underline-offset-4' : ''}`} style={{transform: 'rotate(180deg)'}}>
           {piece.type}
         </span>
       );
     }
     
-    return piece.type;
+    return <span className={isPromoted ? 'underline underline-offset-4' : ''}>{piece.type}</span>;
   };
 
   // リセット
@@ -325,7 +328,7 @@ export default function ShogiMatePage() {
     setIsAnalyzing(true);
     setSolutionSteps([]);
     
-    const timeoutMs = 10000; // 10秒でタイムアウト
+    const timeoutMs = 15000; // 15秒でタイムアウト
     const abortController = new AbortController();
     
     // タイムアウトタイマーを設定
@@ -1739,8 +1742,8 @@ export default function ShogiMatePage() {
 
       <div className="mt-6 text-sm text-gray-600">
         <p>※ 盤面のマスをクリックして選択してから、右側の駒ボタンをクリックして配置してください</p>
-        <p>※ 相手の駒は赤色（上向き）、自分の駒は青色（下向き）で表示されます</p>
-        <p>※ 持ち駒は自分の駒のみ配置できます。空欄（+）をクリックして駒を追加できます</p>
+        <p>※ 同じ駒を同じ位置に配置すると、成駒になります</p>
+        <p>※ 持ち駒は空欄（+）をクリックして追加できます</p>
       </div>
 
       {/* エクスポートモーダル */}
