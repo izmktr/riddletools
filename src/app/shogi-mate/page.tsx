@@ -52,7 +52,6 @@ export default function ShogiMatePage() {
   const [importText, setImportText] = useState("");
   const [solutionSteps, setSolutionSteps] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [searchQueue, setSearchQueue] = useState<PriorityQueue | null>(null);
   const [viewMode, setViewMode] = useState(false);
   const [initialField, setInitialField] = useState<Field | null>(null);
   const [rootMoves, setRootMoves] = useState<MovePiece[]>([]);
@@ -787,18 +786,6 @@ export default function ShogiMatePage() {
     }
   }
 
-  // 失敗判定処理（相手のすべての手が失敗したか確認）
-  function checkAllOpponentMovesExplored(move: MovePiece): boolean {
-    // 相手の手番のすべての選択肢が探索済みか確認
-    if (!move.nextMove || move.nextMove.length === 0) {
-      return false; // まだ生成されていない
-    }
-    // すべての子が失敗か確認
-    return move.nextMove.every(m => m.status === 'failure');
-  }
-
-
-
   // 詰将棋の解析メイン関数（非同期版）
   const analyzeMateAsync = async (
     initialBoard: (Piece | null)[][], 
@@ -818,9 +805,8 @@ export default function ShogiMatePage() {
 
     const field = Field.fromBoard(initialBoard, initialCaptured);
     
-    // 優先度付きキューを作成してstateに保存
+    // 優先度付きキューを作成
     const queue = new PriorityQueue();
-    setSearchQueue(queue);
 
     let computedMove: MovePiece | null = null;
     let nodeCount = 0;
@@ -1026,25 +1012,6 @@ export default function ShogiMatePage() {
   };
 
   // 王が詰んでいないかチェック（守り方の手の有効性確認）
-  const isKingSafe = (field: Field, move: MovePiece): boolean => {
-    const nextField = Field.advanceStepField(field, [move]);
-    const nextBoard = fieldToBoard(nextField);
-    const kingPos = nextField.opponentking.position ?? new Coordinate(0, 0);
-
-    // 王のマスに移動可能なコマがあるか？
-    return nextField.selfpieces.some(pp => {
-      // 自分の駒を確認
-      if (pp.position) {
-        const pieceMoves = getPieceMoves(nextBoard, pp.position, pp.piece, 'self');
-
-        if (pieceMoves.some(mv => mv.row === kingPos.row && mv.col === kingPos.col)) {
-          return true;
-        }
-      }
-      return false;
-    });
-  };
-
   // 駒の移動可能な位置を生成
   const generateSelfMoves = (field: Field, steps : number, prevMove: MovePiece | null): MovePiece[] => {
     const moves: MovePiece[] = [];
