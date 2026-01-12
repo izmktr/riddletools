@@ -1080,7 +1080,7 @@ export default function NurikabePage() {
       setBoard(newBoard);
       setShowImport(false);
       alert("インポートしました！");
-    } catch (error) {
+    } catch {
       alert("インポートに失敗しました。形式を確認してください。");
     }
   };

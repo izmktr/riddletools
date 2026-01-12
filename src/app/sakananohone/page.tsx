@@ -73,6 +73,7 @@ export default function SakananohonePage() {
     } else {
       generateHorizontalTable(words, positionNumbers);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wordList, positionList, isVertical, rowNumberType]);
 
   // 横書き（従来）の表生成
