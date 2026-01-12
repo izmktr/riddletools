@@ -719,14 +719,14 @@ export default function ShogiMatePage() {
     // 自分の駒を位置でソートして文字列化
     const selfPieces = field.selfpieces
       .filter(pp => pp.position)
-      .map(pp => `${pp.position!.row},${pp.position!.col}:${pp.piece}`)
+      .map(pp => `${pp.position!.row}${pp.position!.col}${pp.piece}`)
       .sort()
       .join('|');
     
     // 相手の駒を位置でソートして文字列化
     const opponentPieces = field.opponentpieces
       .filter(pp => pp.position)
-      .map(pp => `${pp.position!.row},${pp.position!.col}:${pp.piece}`)
+      .map(pp => `${pp.position!.row}${pp.position!.col}${pp.piece}`)
       .sort()
       .join('|');
     
@@ -736,7 +736,7 @@ export default function ShogiMatePage() {
       .map(([piece, count]) => `${piece}:${count}`)
       .join(',');
     
-    return `S${selfPieces}|O${opponentPieces}|C${captured}`;
+    return `S${selfPieces}O${opponentPieces}C${captured}`;
   };
 
   // 成功判定処理
@@ -935,7 +935,7 @@ export default function ShogiMatePage() {
   };
 
   // 駒の移動先を取得
-  const getPieceMoves = (board: (Piece | null)[][], pos : Coordinate, pieceType : PieceType, side : Side = 'self', ranpage :boolean = false): Coordinate[] => {
+  const getPieceMoves = (board: (Piece | null)[][], pos : Coordinate, pieceType : PieceType, side : Side = 'self', trample :boolean = false): Coordinate[] => {
     const moves: Coordinate[] = [];
     const directions = getPieceDirections(pieceType, side);
     
@@ -948,8 +948,8 @@ export default function ShogiMatePage() {
         
         
         const target = board[newRow][newCol];
-        // ranpageがtrueの場合、自分の駒にも移動できる
-        if (target && target.side === side && !ranpage) break;
+        // trampleがtrueの場合、自分の駒にも移動できる
+        if (target && target.side === side && !trample) break;
         
         moves.push(new Coordinate(newRow, newCol));
         
@@ -1071,7 +1071,9 @@ export default function ShogiMatePage() {
             const kingMoveList = getPieceMoves(board, kingpos, pieceType, 'opponent');
             // 王手の範囲
             kingMoveList.forEach(move => {
-                moves.push(new MovePiece(steps, pieceType, null, move, prevMove));
+                if (board[move.row][move.col] === null){
+                    moves.push(new MovePiece(steps, pieceType, null, move, prevMove));
+                }
             });
         }
     });
@@ -1378,9 +1380,18 @@ export default function ShogiMatePage() {
                   let candidateMove: MovePiece | null = null;
                   let isPieceSelectable = false;
                   let isSelectedPiece = false;
+                  let isLastMovedPiece = false; // 直前に動かした駒かどうか
+                  let isLastMoveDropped = false; // 直前の手が打ったものか
                   
                   if (viewMode) {
                     const filteredMoves = getFilteredMoves();
+                    
+                    // 直前に動かした駒の位置をチェック
+                    if (currentPath.length > 0) {
+                      const lastMove = currentPath[currentPath.length - 1];
+                      isLastMovedPiece = lastMove.to.row === rowIndex && lastMove.to.col === colIndex;
+                      isLastMoveDropped = lastMove.IsDrop();
+                    }
                     
                     // 選択中の駒かどうか（盤上の駒のみチェック）
                     isSelectedPiece = selectedPieceInView !== null && 
@@ -1406,6 +1417,7 @@ export default function ShogiMatePage() {
                       className={`w-12 h-12 border border-amber-900 flex items-center justify-center text-xl font-bold relative
                         ${!viewMode ? 'cursor-pointer' : (candidateMove || isPieceSelectable) ? 'cursor-pointer' : ''}
                         ${isSelected && !viewMode ? 'bg-yellow-300' : 
+                          isLastMovedPiece ? 'bg-red-100' :
                           isSelectedPiece ? 'bg-yellow-300' :
                           candidateMove ? 'bg-green-200' : 
                           isPieceSelectable ? 'bg-blue-100' : 'bg-amber-50'}
@@ -1450,6 +1462,12 @@ export default function ShogiMatePage() {
                         }
                       }}
                     >
+                      {/* 直前に打った駒の場合「打」を表示 */}
+                      {isLastMovedPiece && isLastMoveDropped && (
+                        <span className="absolute top-0 right-0 text-xs bg-orange-500 text-white px-1 rounded">
+                          打
+                        </span>
+                      )}
                       {renderPiece(piece)}
                       {candidateMove && (() => {
                         // この移動先への候補を取得
