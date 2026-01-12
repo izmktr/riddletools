@@ -21,6 +21,7 @@ export default function Home() {
     ["数独ソルバー", "/sudoku"],
     ["中国剰余定理", "/chinese-remainder"],
     ["ぬりかべソルバー(WIP)", "/nurikabe"],
+    ["詰将棋ソルバー", "/shogi-mate"],
   ];
 
   // 色のグラデーション生成関数
