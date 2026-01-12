@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 
 type PieceType = '歩' | '香' | '桂' | '銀' | '金' | '王' | '玉' | '飛' | '角' | 'と' | '成香' | '成桂' | '成銀' | '龍' | '馬' | null;
@@ -59,6 +59,12 @@ export default function ShogiMatePage() {
   const [solutionPath, setSolutionPath] = useState<MovePiece[] | null>(null);
   const [selectedPieceInView, setSelectedPieceInView] = useState<Coordinate | PieceType | null>(null);
   const [selectedDestination, setSelectedDestination] = useState<Coordinate | null>(null);
+  const [analysisProgress, setAnalysisProgress] = useState<{queueSize: number, maxDepth: number} | null>(null);
+
+  // ページタイトルを設定
+  useEffect(() => {
+    document.title = "詰将棋ソルバー | RiddleTools";
+  }, []);
 
   // 盤面のセルをクリック
   const handleCellClick = (row: number, col: number) => {
@@ -327,6 +333,7 @@ export default function ShogiMatePage() {
   const handleAnalyze = async () => {
     setIsAnalyzing(true);
     setSolutionSteps([]);
+    setAnalysisProgress({ queueSize: 0, maxDepth: 0 });
     
     const timeoutMs = 15000; // 15秒でタイムアウト
     const abortController = new AbortController();
@@ -337,7 +344,7 @@ export default function ShogiMatePage() {
     }, timeoutMs);
     
     try {
-      const result = await analyzeMateAsync(board, capturedPieces, abortController.signal);
+      const result = await analyzeMateAsync(board, capturedPieces, abortController.signal, setAnalysisProgress);
       clearTimeout(timeoutId);
       
       setSolutionSteps(result.steps);
@@ -371,6 +378,7 @@ export default function ShogiMatePage() {
       }
     } finally {
       setIsAnalyzing(false);
+      setAnalysisProgress(null);
     }
   };
 
@@ -800,7 +808,8 @@ export default function ShogiMatePage() {
   const analyzeMateAsync = async (
     initialBoard: (Piece | null)[][], 
     initialCaptured: PieceType[], 
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
+    progressCallback?: (progress: {queueSize: number, maxDepth: number}) => void
   ): Promise<{ 
     steps: string[], 
     moves: MovePiece[], 
@@ -854,8 +863,13 @@ export default function ShogiMatePage() {
 
         nodeCount++;
         maxStepReached = Math.max(maxStepReached, move.step);
+        
         // 定期的にイベントループに制御を戻す
         if (nodeCount % yieldInterval === 0) {
+            // 進捗情報を更新（1000ノードごと）
+            if (progressCallback){
+                progressCallback({ queueSize: queue.size(), maxDepth: maxStepReached });
+            }
             await new Promise(resolve => setTimeout(resolve, 0));
         }
 
@@ -1348,6 +1362,11 @@ export default function ShogiMatePage() {
               onClick={handleAnalyze}
               disabled={isAnalyzing}
             >{isAnalyzing ? '解析中...' : '解析'}</button>
+            {isAnalyzing && analysisProgress && (
+              <span className="text-sm text-gray-600">
+                探索中: {analysisProgress.maxDepth}手目 (候補: {analysisProgress.queueSize})
+              </span>
+            )}
             <button
               className="px-4 py-2 bg-red-200 text-red-700 rounded hover:bg-red-300"
               onClick={handleReset}
