@@ -168,7 +168,7 @@ export default function ShogiMatePage() {
     if (!piece) return '';
     
     // 成り駒かどうか判定
-    const isPromoted = piece.type in UNPROMOTED_MAP;
+    const isPromoted = piece.type! in UNPROMOTED_MAP;
     
     // 相手の駒は180度回転
     if (piece.side === 'opponent') {
@@ -971,14 +971,14 @@ export default function ShogiMatePage() {
         
         if (newRow < 0 || newRow >= 9 || newCol < 0 || newCol >= 9) break;
         
-        
         const target = board[newRow][newCol];
         // trampleがtrueの場合、自分の駒にも移動できる
-        if (target && target.side === side && !trample) break;
+        if (target && target.side === side && !trample && (side !== 'self' || target.type !== '玉')) break;
         
         moves.push(new Coordinate(newRow, newCol));
         
-        if (target) break; // 相手の駒で止まる
+        // 自分の場合、玉を貫通する
+        if (target && (side !== 'self' || target.type !== '玉')) break; // 相手の駒で止まる
       }
     }
     
@@ -1326,7 +1326,7 @@ export default function ShogiMatePage() {
     newBoard[4][7] = { type: '角', side: 'self' };     // 8 5 S 角
     
     setBoard(newBoard);
-    setCapturedPieces(['金']);
+    setCapturedPieces(['銀']);
     setSelectedCell(null);
     setSelectedCapturedIndex(null);
   };
@@ -1698,7 +1698,7 @@ export default function ShogiMatePage() {
               <>
                 <p className="text-sm text-gray-600 mb-2">
                   {currentPath.length % 2 === 0 ? '攻め方の手' : '守り方の手'} 
-                  ({getFilteredMoves().length}手{selectedPieceInView ? ' / 絞り込み中' : ''})
+                  ({getFilteredMoves().length}種類{selectedPieceInView ? ' / 絞り込み中' : ''})
                 </p>
                 <div className="max-h-96 overflow-y-auto space-y-2">
                   {getFilteredMoves().map((move, index) => (
@@ -1744,6 +1744,7 @@ export default function ShogiMatePage() {
         <p>※ 盤面のマスをクリックして選択してから、右側の駒ボタンをクリックして配置してください</p>
         <p>※ 同じ駒を同じ位置に配置すると、成駒になります</p>
         <p>※ 持ち駒は空欄（+）をクリックして追加できます</p>
+        <p>※ 大体、7手詰めまでなら解析できます</p>
       </div>
 
       {/* エクスポートモーダル */}
