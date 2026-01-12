@@ -437,6 +437,13 @@ export default function ShogiMatePage() {
         return moves.reverse();
     }
 
+    getStatus(): Status {
+        if (this.redirectMove){
+            return this.redirectMove.status;
+        }
+        return this.status;
+    }
+
   }
 
   // 座標と駒タイプのペア
@@ -769,7 +776,7 @@ export default function ShogiMatePage() {
         if (move.prevMove.prevMove){
             move.prevMove.status = 'success';
             // 直前の手のすべての選択肢が成功かチェック
-            const allSiblingsSuccess = move.prevMove.prevMove.nextMove.every(mv => mv.status === 'success');
+            const allSiblingsSuccess = move.prevMove.prevMove.nextMove.every(mv => mv.getStatus() === 'success');
         
             if (allSiblingsSuccess) {
                 // さらにその前の手がなければ、成功を返す
@@ -853,7 +860,7 @@ export default function ShogiMatePage() {
         if (step % 2 === 0) {
             // 攻め方の手番
             // 前回の自分の手が失敗していたらスキップ
-            if (move.prevMove && move.prevMove.status === 'failure') continue;
+            if (move.prevMove && move.prevMove.getStatus() === 'failure') continue;
 
             // 攻め方を列挙する関数
             const nextField = Field.advanceBaseField(field, move);
@@ -891,7 +898,7 @@ export default function ShogiMatePage() {
         }else{
             // 守り方の手番
             // 前回の相手の手が成功していたらスキップ
-            if (move.prevMove && move.prevMove.status === 'success') continue;
+            if (move.prevMove && move.prevMove.getStatus() === 'success') continue;
 
             const nextField = Field.advanceBaseField(field, move);
 
@@ -1022,7 +1029,7 @@ export default function ShogiMatePage() {
     field.selfpieces.forEach(pp => {
         // 自分の駒の移動範囲を取得
         const pos = pp.position;
-        if (pos) {
+        if (pos && pp.piece) {
             // 自分の駒の移動範囲を取得
             const pieceMoves = getPieceMoves(board, pos, pp.piece, 'self');
             // 王手の範囲を取得
@@ -1034,22 +1041,21 @@ export default function ShogiMatePage() {
                 }
             });
             // 成れるコマか
-            if (pp.piece && pp.piece in PROMOTED_MAP) {
+            if (pp.piece in PROMOTED_MAP) {
                 const promotedType = PROMOTED_MAP[pp.piece];
-                // 成り駒の移動範囲を取得
-                const promotedMoves = getPieceMoves(board, pos, promotedType, 'self' );
+
                 // 王手の範囲を取得
-                const kingMovePromotedList = getPieceMoves(board, kingpos, promotedType, 'opponent' );
+                const kingMovePromotedList = getPieceMoves(board, kingpos, promotedType, 'opponent', true);
                 if (pos.isEnemyField()) {
                     // この2つが重なった場所が王手の範囲
-                    promotedMoves.forEach(move => {
+                    pieceMoves.forEach(move => {
                         if (kingMovePromotedList.some(km => km.row === move.row && km.col === move.col)) {
                             moves.push(new MovePiece(steps, promotedType, pos, move, prevMove, true));
                         }
                     }); 
                 }else{
                     // 移動後の位置が敵陣の場合も成れる
-                    promotedMoves.forEach(move => {
+                    pieceMoves.forEach(move => {
                         if (move.isEnemyField() && kingMovePromotedList.some(km => km.row === move.row && km.col === move.col)) {
                             moves.push(new MovePiece(steps, promotedType, pos, move, prevMove, true));
                         }
@@ -1155,9 +1161,20 @@ export default function ShogiMatePage() {
     return moves;
   }
 
+  const StatusFormat = (status : Status) : string => {
+    switch(status){
+        case 'success':
+            return '【成功】';
+        case 'failure':
+            return '【失敗】';
+        default:
+            return '';
+    }
+  };
+
   // 手を文字列化
   const formatMove = (move: MovePiece, success: boolean = false): string => {
-    const str = (success && move.status) ? move.status != 'none' ?`【${move.status === 'success' ? '成功' : '失敗'}】` : '' : '';
+    const str = success ? StatusFormat(move.getStatus()) : '';
 
     if (move.from === null) {
       return `${move.step + 1}手: 持ち駒の${move.piece}を${9 - move.to.col}${KANJI_NUMBERS[move.to.row + 1]}に打つ` + str;
@@ -1628,16 +1645,6 @@ export default function ShogiMatePage() {
                 }
               >
                 削除
-              </button>
-            </div>
-
-            {/* リセットボタン */}
-            <div>
-              <button
-                className="w-full px-4 py-2 bg-red-200 text-red-700 rounded hover:bg-red-300 font-bold"
-                onClick={handleReset}
-              >
-                盤面リセット
               </button>
             </div>
           </div>
