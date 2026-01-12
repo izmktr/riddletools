@@ -540,6 +540,8 @@ export default function ShogiMatePage() {
         this.capturedPieces = capturedPieces;
     }
 
+    
+
     // フィールドのコピーを作成
     clone(): Field {
       const cloneCoordinate = (coord: Coordinate | null): Coordinate | null => {
@@ -712,6 +714,31 @@ export default function ShogiMatePage() {
     return field.toBoard();
   };
 
+  // Fieldをハッシュ文字列に変換（トランスポジション検出用）
+  const hashField = (field: Field): string => {
+    // 自分の駒を位置でソートして文字列化
+    const selfPieces = field.selfpieces
+      .filter(pp => pp.position)
+      .map(pp => `${pp.position!.row},${pp.position!.col}:${pp.piece}`)
+      .sort()
+      .join('|');
+    
+    // 相手の駒を位置でソートして文字列化
+    const opponentPieces = field.opponentpieces
+      .filter(pp => pp.position)
+      .map(pp => `${pp.position!.row},${pp.position!.col}:${pp.piece}`)
+      .sort()
+      .join('|');
+    
+    // 持ち駒をソートして文字列化
+    const captured = Array.from(field.capturedPieces.entries())
+      .sort((a, b) => (a[0] || '').localeCompare(b[0] || ''))
+      .map(([piece, count]) => `${piece}:${count}`)
+      .join(',');
+    
+    return `S${selfPieces}|O${opponentPieces}|C${captured}`;
+  };
+
   // 成功判定処理
   function setSuccess(move: MovePiece): boolean {
     // この処理は、自分の手番か確認
@@ -721,15 +748,18 @@ export default function ShogiMatePage() {
 
     move.status = 'success';
     if (move.prevMove){
-        move.prevMove.status = 'success';
-        // 直前の手のすべての選択肢が成功かチェック
-        const allSiblingsSuccess = move.prevMove.nextMove.every(mv => mv.status === 'success');
-        if (allSiblingsSuccess) {
-            // さらにその前の手がなければ、成功を返す
-            if (move.prevMove.prevMove){
-                return setSuccess(move.prevMove.prevMove);
-            }else{
-                return true;
+        if (move.prevMove.prevMove){
+            move.prevMove.status = 'success';
+            // 直前の手のすべての選択肢が成功かチェック
+            const allSiblingsSuccess = move.prevMove.prevMove.nextMove.every(mv => mv.status === 'success');
+        
+            if (allSiblingsSuccess) {
+                // さらにその前の手がなければ、成功を返す
+                if (move.prevMove.prevMove){
+                    return setSuccess(move.prevMove.prevMove);
+                }else{
+                    return true;
+                }
             }
         }
         return false;
@@ -776,10 +806,14 @@ export default function ShogiMatePage() {
     let computedMove: MovePiece | null = null;
     let nodeCount = 0;
     let maxStepReached = 0;
+    let hashcount = 0;
     const yieldInterval = 1000; // 1000ノードごとにイベントループに制御を戻す
 
     const attackerMoves = generateSelfMoves(field, 0, null);
     queue.pushArray(0, attackerMoves);
+
+    // トランスポジション（同一局面）検出用
+    const visitedFields = new Set<string>();
 
     while(!queue.isEmpty()) {
         // タイムアウトチェック
@@ -819,6 +853,14 @@ export default function ShogiMatePage() {
             // 攻め方を列挙する関数
             const nextField = Field.advanceBaseField(field, move);
 
+            // トランスポジション検出（同一盤面をスキップ）
+            const fieldHash = hashField(nextField);
+            if (visitedFields.has(fieldHash)) {
+                hashcount++;
+                continue; // 既に探索済みの盤面
+            }
+            visitedFields.add(fieldHash);
+
             // 駒数チェック：全滅 or 手持ちなし＋駒1枚で負け
             if (nextField.selfpieces.length == 0 || nextField.selfpieces.length + nextField.capturedPieces.size < 2) {
                 if (move.prevMove) {
@@ -842,6 +884,15 @@ export default function ShogiMatePage() {
             if (move.prevMove && move.prevMove.status === 'success') continue;
 
             const nextField = Field.advanceBaseField(field, move);
+
+            // トランスポジション検出（同一盤面をスキップ）
+            const fieldHash = hashField(nextField);
+            if (visitedFields.has(fieldHash)) {
+                hashcount++;
+                continue; // 既に探索済みの盤面
+            }
+            visitedFields.add(fieldHash);
+
             const attackerMoves = generateOpponentMoves(nextField, step, move);
             if (attackerMoves.length === 0) {
                 // 直前の手が打ち歩詰めかチェック
@@ -877,6 +928,8 @@ export default function ShogiMatePage() {
         });
         return { steps, moves: moveSequence, initialField: field, rootMoves: attackerMoves };
     }
+
+    console.log(`探索終了: ノード数=${nodeCount}, トランスポジションヒット=${hashcount}`);
 
     return { steps: [], moves: [], initialField: field, rootMoves: attackerMoves };
   };
@@ -1179,43 +1232,62 @@ export default function ShogiMatePage() {
   const getFilteredMoves = (): MovePiece[] => {
     const allMoves = getCurrentMoves();
     
-    if (!selectedPieceInView) {
-      return allMoves;
-    }
+    let filteredMoves: MovePiece[];
     
-    // 持ち駒が選択されている場合（PieceTypeの場合）
-    if (typeof selectedPieceInView === 'string') {
+    if (!selectedPieceInView) {
+      filteredMoves = allMoves;
+    } else if (typeof selectedPieceInView === 'string') {
+      // 持ち駒が選択されている場合（PieceTypeの場合）
       const dropMoves = allMoves.filter(move => 
         move.IsDrop() && move.piece === selectedPieceInView
       );
       
       // 移動先が選択されている場合、さらに絞り込み
       if (selectedDestination) {
-        return dropMoves.filter(move =>
+        filteredMoves = dropMoves.filter(move =>
           move.to.row === selectedDestination.row &&
           move.to.col === selectedDestination.col
         );
+      } else {
+        filteredMoves = dropMoves;
       }
-      
-      return dropMoves;
-    }
-    
-    // 盤上の駒が選択されている場合（Coordinateの場合）
-    const pieceMoves = allMoves.filter(move => 
-      move.from && 
-      move.from.row === selectedPieceInView.row && 
-      move.from.col === selectedPieceInView.col
-    );
-    
-    // 移動先が選択されている場合、さらに絞り込み（成りと不成の両方を表示）
-    if (selectedDestination) {
-      return pieceMoves.filter(move =>
-        move.to.row === selectedDestination.row &&
-        move.to.col === selectedDestination.col
+    } else {
+      // 盤上の駒が選択されている場合（Coordinateの場合）
+      const pieceMoves = allMoves.filter(move => 
+        move.from && 
+        move.from.row === selectedPieceInView.row && 
+        move.from.col === selectedPieceInView.col
       );
+      
+      // 移動先が選択されている場合、さらに絞り込み（成りと不成の両方を表示）
+      if (selectedDestination) {
+        filteredMoves = pieceMoves.filter(move =>
+          move.to.row === selectedDestination.row &&
+          move.to.col === selectedDestination.col
+        );
+      } else {
+        filteredMoves = pieceMoves;
+      }
     }
     
-    return pieceMoves;
+    // ソート処理：詰み手（solutionPathに含まれる）を最優先、次に成功属性
+    return filteredMoves.sort((a, b) => {
+      // solutionPathに含まれる手かチェック
+      const aInSolution = solutionPath && currentPath.length < solutionPath.length && 
+        solutionPath[currentPath.length] === a;
+      const bInSolution = solutionPath && currentPath.length < solutionPath.length && 
+        solutionPath[currentPath.length] === b;
+      
+      if (aInSolution && !bInSolution) return -1;
+      if (!aInSolution && bInSolution) return 1;
+      
+      // 成功属性でソート
+      if (a.status === 'success' && b.status !== 'success') return -1;
+      if (a.status !== 'success' && b.status === 'success') return 1;
+      
+      // それ以外は元の順序を維持
+      return 0;
+    });
   };
 
   // サンプル問題を読み込む
