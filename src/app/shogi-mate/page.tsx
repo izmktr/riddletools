@@ -782,6 +782,19 @@ export default function ShogiMatePage() {
         throw new Error('setSuccessは自分の手番で呼び出す必要があります');
     }
 
+    // 持ち駒の金を2四に打つ のログを出す
+    if (move.step === 4 && move.piece === '金' && move.IsDrop()) {
+        const log = formatMove(move, true);
+        if (log.indexOf('2四') !== -1) {
+          console.log(`setSuccess:5手目の金打ち`, log);
+          console.log(formatMove(move.prevMove!, true));
+          move.prevMove!.prevMove!.nextMove.forEach(mv => {
+            console.log(formatMove(mv, true));
+          });
+        }
+    }
+
+
     // 自分の手を成功
     move.status = 'success';
     if (move.prevMove){
@@ -1727,17 +1740,24 @@ export default function ShogiMatePage() {
                   ({getFilteredMoves().length}種類{selectedPieceInView ? ' / 絞り込み中' : ''})
                 </p>
                 <div className="max-h-96 overflow-y-auto space-y-2">
-                  {getFilteredMoves().map((move, index) => (
-                    <button
-                      key={index}
-                      className="w-full px-3 py-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded text-left text-sm"
-                      onClick={() => handleSelectMove(move)}
-                    >
-                      <div className="font-semibold text-blue-700">
-                        {formatMove(move, true)}
-                      </div>
-                    </button>
-                  ))}
+                  {getFilteredMoves().map((move, index) => {
+                    const isOpponentTurn = currentPath.length % 2 === 1;
+                    return (
+                      <button
+                        key={index}
+                        className={`w-full px-3 py-2 rounded text-left text-sm ${
+                          isOpponentTurn 
+                            ? 'bg-red-50 hover:bg-red-100 border border-red-200' 
+                            : 'bg-blue-50 hover:bg-blue-100 border border-blue-200'
+                        }`}
+                        onClick={() => handleSelectMove(move)}
+                      >
+                        <div className={`font-semibold ${isOpponentTurn ? 'text-red-700' : 'text-blue-700'}`}>
+                          {formatMove(move, true)}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </>
             ) : (
