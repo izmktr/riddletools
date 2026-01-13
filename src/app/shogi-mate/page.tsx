@@ -4,7 +4,7 @@ import Link from "next/link";
 
 type PieceType = '歩' | '香' | '桂' | '銀' | '金' | '王' | '玉' | '飛' | '角' | 'と' | '成香' | '成桂' | '成銀' | '龍' | '馬' | null;
 type Side = 'self' | 'opponent' | null;
-type Status = 'none' | 'success' | 'failure';
+type Status = 'none' | 'success' | 'failure' | 'done';
 
 interface Piece {
   type: PieceType;
@@ -782,23 +782,22 @@ export default function ShogiMatePage() {
         throw new Error('setSuccessは自分の手番で呼び出す必要があります');
     }
 
+    // 自分の手を成功
     move.status = 'success';
     if (move.prevMove){
+        // 必ず詰み手を選ばれるので、相手の手番でも成功
+        move.prevMove.status = 'success';
         if (move.prevMove.prevMove){
-            move.prevMove.status = 'success';
             // 直前の手のすべての選択肢が成功かチェック
             const allSiblingsSuccess = move.prevMove.prevMove.nextMove.every(mv => mv.getStatus() === 'success');
-        
+
             if (allSiblingsSuccess) {
-                // さらにその前の手がなければ、成功を返す
-                if (move.prevMove.prevMove){
-                    return setSuccess(move.prevMove.prevMove);
-                }else{
-                    return true;
-                }
+              // さらにその前の手に成功をつける
+                return setSuccess(move.prevMove.prevMove);
             }
+            return false;
         }
-        return false;
+        throw new Error('setSuccess:相手番の直前の手がない');
     }else{
         return true;
     }
@@ -857,6 +856,11 @@ export default function ShogiMatePage() {
 
         const move = queue.pop();
         if (!move) break;
+
+        // 処理済みに変更
+        if (move.getStatus() !== 'none') continue;
+        move.status = 'done';
+
         if (maxDepth <= move.step) {
             continue;
         }
@@ -926,6 +930,9 @@ export default function ShogiMatePage() {
                 const firstMove = visitedFields.get(fieldHash);
                 if (firstMove) {
                     move.redirectMove = firstMove;
+                    if (firstMove.getStatus() === 'success') {
+                      setSuccess(move);
+                    }
                 }
                 hashcount++;
                 continue;
