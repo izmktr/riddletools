@@ -234,21 +234,6 @@ export default function ShogiMatePage() {
 
   // 手を選択
   const handleSelectMove = (move: MovePiece) => {
-    // リダイレクトがある場合、パスを再構築
-    if (currentPath.length > 0) {
-      const lastMove = currentPath[currentPath.length - 1];
-      if (lastMove.redirectMove) {
-        // リダイレクト先の履歴を取得
-        const redirectedHistory = lastMove.redirectMove.History();
-        // 現在のパスの最後を除いた部分 + リダイレクト先の履歴 + 新しい手
-        const newPath = [...currentPath.slice(0, -1), ...redirectedHistory, move];
-        setCurrentPath(newPath);
-        setSelectedPieceInView(null);
-        setSelectedDestination(null);
-        return;
-      }
-    }
-    
     setCurrentPath([...currentPath, move]);
     setSelectedPieceInView(null);
     setSelectedDestination(null);
@@ -417,6 +402,8 @@ export default function ShogiMatePage() {
     nextMove : MovePiece [] = [];
     status: Status = 'none';
     redirectMove : MovePiece | null = null;
+    redirectedList: MovePiece [] = [];
+
     constructor(step: number, piece: PieceType, from: Coordinate | null, to: Coordinate, prevMove: MovePiece | null, change: boolean = false) {
         this.step = step;
         this.piece = piece;
@@ -449,10 +436,15 @@ export default function ShogiMatePage() {
     }
 
     getStatus(): Status {
-        if (this.redirectMove){
-            return this.redirectMove.status;
-        }
-        return this.status;
+      if (this.redirectMove) {
+        return this.redirectMove.status;
+      }
+      return this.status;
+    }
+
+    setRedirect(move: MovePiece): void {
+        this.redirectMove = move;
+        move.redirectedList.push(this);
     }
 
   }
@@ -775,45 +767,91 @@ export default function ShogiMatePage() {
     return `S${selfPieces}O${opponentPieces}C${captured}{${side}}`;
   };
 
+  // 相手の手番で全ての選択肢が成功かチェックし、成功なら上位に伝播
+  function checkAndPropagateOpponentSuccess(move: MovePiece): boolean {
+    if (!move.IsSelfStep()){
+      console.trace('現在のスタックトレース');
+      throw new Error('checkAndPropagateOpponentSuccessは自分の手番でのみ呼び出してください\n' + formatMove(move));
+    }
+
+    const allSiblingsSuccess = move.nextMove.every(mv => mv.getStatus() === 'success');
+    if (allSiblingsSuccess) {
+      // さらにその前の手に成功をつける
+      const result = setSuccess(move);
+      if (result) return true;
+    }
+
+    return false;
+  }
+
+  // 同一盤面があるか確認し、なければ登録する関数
+  function checkOrRegisterField(
+    visitedFields: Map<string, MovePiece>,
+    nextField: Field, 
+    move: MovePiece
+  ): MovePiece | null {
+    /* デバッグ用に一時的にコメントアウト
+    const fieldHash = hashField(nextField, move.IsSelfStep() ? 's' : 'o');
+    
+    // 既に探索済みの盤面があるか確認
+    if (visitedFields.has(fieldHash)) {
+      const firstMove = visitedFields.get(fieldHash);
+      if (firstMove) {
+        move.setRedirect(firstMove);
+        return firstMove;
+      }
+    }
+    
+    // 新しい盤面として登録
+    visitedFields.set(fieldHash, move);
+    */
+    return null;
+  }
+
   // 成功判定処理
   function setSuccess(move: MovePiece): boolean {
-    // この処理は、自分の手番か確認
-    if (!move.IsSelfStep()) {
-        throw new Error('setSuccessは自分の手番で呼び出す必要があります');
+    // すでに成功済みならスキップ（無限ループ防止）
+    if (move.status === 'success') {
+      console.trace('現在のスタックトレース');
+      throw new Error('successが2回呼ばれました');
     }
 
-    // 持ち駒の金を2四に打つ のログを出す
-    if (move.step === 4 && move.piece === '金' && move.IsDrop()) {
-        const log = formatMove(move, true);
-        if (log.indexOf('2四') !== -1) {
-          console.log(`setSuccess:5手目の金打ち`, log);
-          console.log(formatMove(move.prevMove!, true));
-          move.prevMove!.prevMove!.nextMove.forEach(mv => {
-            console.log(formatMove(mv, true));
-          });
-        }
+    // もし、リダイレクト側なら、元で処理してもらう
+    if (move.redirectMove) {
+      return setSuccess(move.redirectMove);
     }
 
-
-    // 自分の手を成功
     move.status = 'success';
-    if (move.prevMove){
-        // 必ず詰み手を選ばれるので、相手の手番でも成功
-        move.prevMove.status = 'success';
-        if (move.prevMove.prevMove){
-            // 直前の手のすべての選択肢が成功かチェック
-            const allSiblingsSuccess = move.prevMove.prevMove.nextMove.every(mv => mv.getStatus() === 'success');
 
-            if (allSiblingsSuccess) {
-              // さらにその前の手に成功をつける
-                return setSuccess(move.prevMove.prevMove);
-            }
-            return false;
-        }
-        throw new Error('setSuccess:相手番の直前の手がない');
-    }else{
-        return true;
+    // 最初の手なら成功
+    if (!move.prevMove){
+      console.trace('現在のスタックトレース');
+      return true;
     }
+
+    if (move.IsSelfStep()){
+      // 先手番なら、直前の後手番を成功に変更して、すべて成功か確認する
+      if (move.prevMove.getStatus() !== 'success') {
+        move.prevMove.status = 'success';
+        if (checkAndPropagateOpponentSuccess(move.prevMove.prevMove!)) return true;
+      }
+      // redirectedListにも伝播
+      for (const mv of move.redirectedList) {
+        if (mv.prevMove && mv.prevMove.getStatus() !== 'success') {
+          mv.prevMove.status = 'success';
+          if (checkAndPropagateOpponentSuccess(mv.prevMove.prevMove!)) return true;
+        }
+      }
+    }else{
+      // 後手番なら、他の手が全て成功か確認して、成功を伝播する
+      if (checkAndPropagateOpponentSuccess(move.prevMove)) return true;
+
+      // redirectedListにも伝播
+      for (const mv of move.redirectedList) {
+        if (checkAndPropagateOpponentSuccess(mv.prevMove!)) return true;
+      }
+    }
+    return false;
   }
 
   // 詰将棋の解析メイン関数（非同期版）
@@ -872,7 +910,6 @@ export default function ShogiMatePage() {
 
         // 処理済みに変更
         if (move.getStatus() !== 'none') continue;
-        move.status = 'done';
 
         if (maxDepth <= move.step) {
             continue;
@@ -892,84 +929,103 @@ export default function ShogiMatePage() {
 
         const step = move.step + 1;
         if (step % 2 === 0) {
-            // 攻め方の手番
-            // 前回の自分の手が失敗していたらスキップ
-            if (move.prevMove && move.prevMove.getStatus() === 'failure') continue;
+          // 先手を考える (moveは直線の手番＝後手)
 
-            // 攻め方を列挙する関数
-            const nextField = Field.advanceBaseField(field, move);
+          // 前回の自分の手が失敗していたらスキップ
+          if (move.prevMove && move.prevMove.getStatus() === 'failure') continue;
 
-            // トランスポジション検出（同一盤面をスキップ）
-            const fieldHash = hashField(nextField, "s");
-            if (visitedFields.has(fieldHash)) {
-                // 既に探索済みの盤面 - リダイレクト設定
-                const firstMove = visitedFields.get(fieldHash);
-                if (firstMove) {
-                    move.redirectMove = firstMove;
+          // 盤面を作成する
+          const nextField = Field.advanceBaseField(field, move);
+
+          // トランスポジション検出（同一盤面をスキップ）
+          const firstMove = checkOrRegisterField(visitedFields, nextField, move);
+          if (firstMove) {
+            // 既に探索済みの盤面 - リダイレクト設定
+            if (firstMove.getStatus() === 'success') {
+              // リダイレクト先で詰みなら、自分側もチェックして上位に伝搬させる
+              if (move.prevMove && move.prevMove.getStatus() !== 'success') {
+                const result = setSuccess(move.prevMove);
+                if (result){
+                  computedMove = move;
+                  break;
                 }
-                hashcount++;
-                continue;
+              }
             }
-            visitedFields.set(fieldHash, move);
+            // 解析してないなら、キューに詰み直す
+            if (firstMove.getStatus() === 'none'){
+              queue.push(0, firstMove);
+            }
+            hashcount++;
+            continue;
+          }
 
-            // 駒数チェック：全滅 or 手持ちなし＋駒1枚で負け
-            if (nextField.selfpieces.length == 0 || nextField.selfpieces.length + nextField.capturedPieces.size < 2) {
-                if (move.prevMove) {
-                    move.prevMove.status = 'failure';
-                }
-                continue;
-            }
-            const attackerMoves = generateSelfMoves(nextField, step, move);
-            if (attackerMoves.length === 0) {
-                // 攻め手がないので負け確定
-                if (move.prevMove) {
-                    move.prevMove.status = 'failure';
-                }
-                continue;
-            }
+          // 駒数チェック：全滅 or 手持ちなし＋駒1枚で負け
+          if (nextField.selfpieces.length == 0 || nextField.selfpieces.length + nextField.capturedPieces.size < 2) {
+              if (move.prevMove) {
+                  move.prevMove.status = 'failure';
+              }
+              move.status = 'done';
+              continue;
+          }
 
-            queue.pushArray(step, attackerMoves);
+          // 攻め方を列挙する関数
+          const attackerMoves = generateSelfMoves(nextField, step, move);
+          if (attackerMoves.length === 0) {
+            // 攻め手がないので負け確定
+            if (move.prevMove) {
+                move.prevMove.status = 'failure';
+            }
+            move.status = 'done';
+            continue;
+          }
+
+          queue.pushArray(step, attackerMoves);
+          move.status = 'done';
         }else{
-            // 守り方の手番
-            // 前回の相手の手が成功していたらスキップ
-            if (move.prevMove && move.prevMove.getStatus() === 'success') continue;
+          // 後手番、moveは直線の手番＝先手
 
-            const nextField = Field.advanceBaseField(field, move);
+          // 前回の相手の手が成功していたらスキップ
+          if (move.prevMove && move.prevMove.getStatus() === 'success' && move.redirectedList.length === 0) continue;
 
-            // トランスポジション検出（同一盤面をスキップ）
-            const fieldHash = hashField(nextField, "o");
-            if (visitedFields.has(fieldHash)) {
-                // 既に探索済みの盤面 - リダイレクト設定
-                const firstMove = visitedFields.get(fieldHash);
-                if (firstMove) {
-                    move.redirectMove = firstMove;
-                    if (firstMove.getStatus() === 'success') {
-                      setSuccess(move);
-                    }
-                }
-                hashcount++;
+          const nextField = Field.advanceBaseField(field, move);
+
+          // トランスポジション検出（同一盤面をスキップ）
+          const firstMove = checkOrRegisterField(visitedFields, nextField, move);
+
+          if (firstMove) {
+            if (firstMove.getStatus() === 'success' && move.prevMove && move.prevMove.getStatus() !== 'success') {
+              // チェックして上位に伝搬させる
+              const result = setSuccess(move.prevMove);
+              computedMove = move;
+              if (result) break;
+            }
+            // 解析してないなら、キューに詰み直す
+            if (firstMove.getStatus() === 'none'){
+              queue.push(0, firstMove);
+            }
+            hashcount++;
+            continue;
+          }
+
+          const attackerMoves = generateOpponentMoves(nextField, step, move);
+          if (attackerMoves.length === 0) {
+            // 直前の手が打ち歩詰めかチェック
+            if (move && move.piece === '歩' && move.IsDrop()) {
+                // 打ち歩詰めなので詰みではない
+                move.status = 'failure';
                 continue;
             }
-            visitedFields.set(fieldHash, move);
 
-            const attackerMoves = generateOpponentMoves(nextField, step, move);
-            if (attackerMoves.length === 0) {
-                // 直前の手が打ち歩詰めかチェック
-                if (move && move.piece === '歩' && move.IsDrop()) {
-                    // 打ち歩詰めなので詰みではない
-                    move.status = 'failure';
-                    continue;
-                }
+            // 詰みを発見
+            const result = setSuccess(move);
 
-                // 詰みを発見
-                const result = setSuccess(move);
-
-                if (result) {
-                    computedMove = move;
-                    break;
-                }
+            if (result) {
+              computedMove = move;
+              break;
             }
-            queue.pushArray(step, attackerMoves);
+          }
+          queue.pushArray(step, attackerMoves);
+          move.status = 'done';
         }
     }
 
@@ -1211,7 +1267,7 @@ export default function ShogiMatePage() {
 
   // 手を文字列化
   const formatMove = (move: MovePiece, success: boolean = false): string => {
-    const str = success ? StatusFormat(move.getStatus()) : '';
+    const str = (success ? StatusFormat(move.getStatus()) : '') + (move.redirectMove ? '[R]' : '');
 
     if (move.from === null) {
       return `${move.step + 1}手: 持ち駒の${move.piece}を${9 - move.to.col}${KANJI_NUMBERS[move.to.row + 1]}に打つ` + str;
@@ -1714,6 +1770,36 @@ export default function ShogiMatePage() {
         <div>
           <h3 className="font-semibold mb-2">候補手リスト</h3>
           <div className="space-y-2">
+            {/* 履歴表示 */}
+            {currentPath.length > 0 && (
+              <div className="p-3 bg-gray-50 border border-gray-300 rounded text-sm">
+                <p className="font-semibold text-gray-700 mb-2">手順履歴</p>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {currentPath.map((move, index) => (
+                    <div key={index}>
+                      <div className="text-xs text-gray-600">
+                        {index + 1}. {formatMove(move, true)}
+                        {move.redirectMove && (
+                          <span className="ml-2 text-purple-600 font-semibold">
+                            (同一盤面)
+                          </span>
+                        )}
+                      </div>
+                      {move.redirectMove && (
+                        <div className="ml-4 mt-1 pl-2 border-l-2 border-purple-300">
+                          <p className="text-xs text-purple-700 font-semibold mb-1">別ルート:</p>
+                          {move.redirectMove.History().map((redirectedMove, ridx) => (
+                            <div key={ridx} className="text-xs text-purple-600">
+                              {ridx + 1}. {formatMove(redirectedMove, true)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {selectedPieceInView && (
               <button
                 className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 rounded text-sm"
