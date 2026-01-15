@@ -222,6 +222,13 @@ export default function ShogiMatePage() {
     }
   };
 
+  // 0手目（初期状態）に戻る
+  const handleResetToStart = () => {
+    setCurrentPath([]);
+    setSelectedPieceInView(null);
+    setSelectedDestination(null);
+  };
+
   // 次の手に進む（詰み筋がある場合のみ）
   const handleNextStep = () => {
     if (solutionPath && currentPath.length < solutionPath.length) {
@@ -1271,8 +1278,7 @@ export default function ShogiMatePage() {
 
   // 手を文字列化
   const formatMove = (move: MovePiece, success: boolean = false): string => {
-    const str = (success ? StatusFormat(move.getStatus()) : '') + (move.redirectMove ? `[R:${move.status}]` : '') 
-    + (move.successMove ? `${move.successMove.to.toString()}${move.successMove.piece}` : '');
+    const str = (success ? StatusFormat(move.getStatus()) : '');
 
     if (move.from === null) {
       return `${move.step + 1}手: ${move.to.toString()}${move.piece}打` + str;
@@ -1473,10 +1479,15 @@ export default function ShogiMatePage() {
             >入力に戻る</button>
             <button
               className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50"
+              onClick={handleResetToStart}
+              disabled={currentPath.length === 0}
+            >0手</button>
+            <button
+              className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50"
               onClick={handlePrevStep}
               disabled={currentPath.length === 0}
             >←</button>
-            <span className="px-4 py-2 font-semibold">
+            <span className="px-4 py-2 font-semibold w-24 text-center">
               {currentPath.length === 0 ? '初期状態' : `${currentPath.length}手目`}
             </span>
             <button
