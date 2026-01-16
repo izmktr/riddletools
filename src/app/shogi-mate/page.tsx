@@ -1284,7 +1284,8 @@ export default function ShogiMatePage() {
       return `${move.step + 1}手: ${move.to.toString()}${move.piece}打` + str;
     } else if (move.from) {
       if (move.change) {
-        return `${move.step + 1}手: ${move.to.toString()}${move.piece}成 [${move.from.toString()}]` + str;
+        const actualPiece = UNPROMOTED_MAP[move.piece as string];
+        return `${move.step + 1}手: ${move.to.toString()}${actualPiece}成 [${move.from.toString()}]` + str;
       }
       return `${move.step + 1}手: ${move.to.toString()}${move.piece} [${move.from.toString()}]` + str;
     }
