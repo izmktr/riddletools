@@ -584,7 +584,7 @@ class Field {
 
   // 到達可能リストを計算し、島を固定する処理
   calculateReachableAndFixIslands(): boolean {
-    let changed = false;
+    const changed = false;
 
     for (const island of this.islands) {
       if (island.isFixed) continue;
@@ -778,7 +778,6 @@ class Field {
           const targetCell = undecidedCells[0];
           const targetX = targetCell.x;
           const targetY = targetCell.y;
-          const targetHash = new Position(targetX, targetY).toHash();
 
           // 確定マスまたは離れ小島として追加
           if (this.addConfirmedCell(targetX, targetY, "2x2壁パターンによる確定")) {
@@ -1097,7 +1096,8 @@ const formatPosition = (x: number, y: number): string => {
   return `(${x + 1},${y + 1})`;
 };
 
-// ハッシュ値から座標を表示用の文字列に変換する関数
+// ハッシュ値から座標を表示用の文字列に変換する関数（デバッグ用）
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const formatPositionFromHash = (hash: number): string => {
   const pos = Position.fromHash(hash);
   return formatPosition(pos.x, pos.y);
