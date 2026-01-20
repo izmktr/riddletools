@@ -96,6 +96,15 @@ class ReachableCellsByDistance {
     return total;
   }
 
+  has(hash: number): boolean {
+    for (const cells of this.cellsByDistance.values()) {
+      if (cells.has(hash)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // クリア
   clear(): void {
     this.cellsByDistance.clear();
@@ -177,6 +186,7 @@ class Island {
   confirmedCells: CellGroup;  // 確定部屋リスト（ハッシュ値）
   detachedConfirmedCells: Island[]; // 離れ小島用のconfirmedCells
   reachableCells: ReachableCellsByDistance;  // 距離ごとの到達部屋リスト
+  unreachableCells: Set<number>; // 到達不可能セルリスト
   isFixed: boolean;  // 確定マスと部屋サイズが同じになったら固定
 
   constructor(field: Field, x: number, y: number, roomSize: number) {
@@ -192,7 +202,16 @@ class Island {
     this.reachableCells = new ReachableCellsByDistance();
 
     this.detachedConfirmedCells = [];
+    this.unreachableCells = new Set<number>();
     this.isFixed = false;
+  }
+
+  detachedSize() {
+    return this.detachedConfirmedCells.reduce((sum, di) => sum + di.confirmedCells.size(), 0);
+  }
+
+  remainingRoomSize(): number {
+    return this.roomSize - this.confirmedCells.size() - this.detachedSize();
   }
 }
 
@@ -232,6 +251,77 @@ class Field {
     }
   }
 
+  // 離れ小島が到達可能範囲に含まれているかチェック,含まれてない場合Trueを返す
+  // そのマスが壁になると小部屋に到達しない場合、Trueを返す
+  isNeedCellForDetachedIslands(island: Island, reachable: Set<number>): boolean {
+    if (island.detachedConfirmedCells.length === 0) {
+      return false;
+    }
+    for (const di of island.detachedConfirmedCells) {
+      // 離れ小島が到達可能範囲に隣接しているか
+      const isolated = this.isDetachedIslandsAdjacentFromReachable(di, reachable);
+      if (!isolated) return true;
+    }
+
+    return false;
+  }
+
+  // 離れ小島が到達可能セルに隣接しているかチェック
+  isDetachedIslandsAdjacentFromReachable(detachedIsland : Island, reachable: Set<number>): boolean {
+    // 離れ小島の隣接マスが到達可能マスに含まれているかチェック
+    const diHashes = detachedIsland.confirmedCells.edgecells;
+    for (const hash of diHashes) {
+      const pos = Position.fromHash(hash);
+      const adjacents = this.getAdjacentPositions(pos.x, pos.y);
+      for (const adjPos of adjacents) {
+        if (reachable.has(adjPos.toHash())) {
+          return true;
+        }
+      }
+    }
+  
+    return false;
+  }
+
+  // 離れ小島を島にマージする処理
+  mergeIslandDetached(targetIsland: Island, detachedIsland: Island): void {
+    // 離れ小島のすべてのセルを島に追加
+    for (const h of detachedIsland.confirmedCells.cells) {
+      // 仮オーナーが島に結合される場合は理由は入れない(仮オーナーの理由を引き継ぐ)
+      this.confirmCellForIsland(h, targetIsland);
+    }
+    // 離れ小島リストから削除
+    this.detachedIslands = this.detachedIslands.filter(di => di !== detachedIsland);
+    // もし、島が離れ小島リストに含まれていたら削除
+    targetIsland.detachedConfirmedCells = targetIsland.detachedConfirmedCells.filter(di => di !== detachedIsland);
+  }
+
+  // 2つの離れ小島をマージする処理（大きい方に小さい方を吸収）
+  mergeTwoDetachedIslands(island1: Island, island2: Island): void {
+    // サイズを比較して、小さい方を大きい方に吸収
+    let absorbingIsland: Island;
+    let disappearingIsland: Island;
+    
+    if (island1.confirmedCells.size() >= island2.confirmedCells.size()) {
+      absorbingIsland = island1;
+      disappearingIsland = island2;
+    } else {
+      absorbingIsland = island2;
+      disappearingIsland = island1;
+    }
+
+    for (const h of disappearingIsland.confirmedCells.cells) {
+      // hashからPositionを取得して、そのセルのownerIslandを更新
+      const pos = Position.fromHash(h);
+      this.cells[pos.y][pos.x].ownerIsland = absorbingIsland;
+    }
+    // 消滅側のすべてのセルを吸収側に追加
+    absorbingIsland.confirmedCells.merge(disappearingIsland.confirmedCells);
+
+    // detachedIslandsから消滅側のグループを削除
+    this.detachedIslands = this.detachedIslands.filter(di => di !== disappearingIsland);
+  }
+
   // 隣接セルの取得
   getAdjacentPositions(x: number, y: number): Position[] {
     const positions: Position[] = [];
@@ -252,7 +342,7 @@ class Field {
     for (const adjPos of adjacents) {
       const cell = this.cells[adjPos.y][adjPos.x];
       if (cell.type === 'undecided' || cell.type === 'preowner') {
-        if (!this.isAdjacentToOtherOwner(adjPos.x, adjPos.y, island, island.roomSize - island.confirmedCells.size())) {
+        if (!this.isAdjacentToOtherOwner(adjPos.x, adjPos.y, island, island.remainingRoomSize())) {
           positions.push(adjPos);
         }
       }
@@ -298,9 +388,12 @@ class Field {
       // 仮オーナーの場合、部屋サイズがオーバーしてないか確認
       if (cell.type === 'preowner'){
         if (cell.ownerIsland && restsize <= cell.ownerIsland.confirmedCells.size()){
+          // すでに自分の島の離れ小島の場合は除外
+          if (island.detachedConfirmedCells.includes(cell.ownerIsland)) continue;
           // 自分自身のマスが仮オーナーの場合は除外
           const mycell = this.cells[y][x];
-          if (mycell.type !== 'preowner') return true;
+          if (mycell.type === 'preowner') continue;
+          return true;
         }
       }
     }
@@ -308,14 +401,24 @@ class Field {
   }
 
   // セルを島の確定セルとして追加する
-  confirmCellForIsland(hash: number, island: Island, reason: string): void {
+  confirmCellForIsland(hash: number, island: Island, reason?: string): void {
     island.confirmedCells.add(hash);
     const pos = Position.fromHash(hash);
     const cell = this.cells[pos.y][pos.x];
     cell.type = 'confirmed';
     cell.confirmedOwners = [island];
     cell.ownerIsland = island;
-    cell.reason = reason;
+    if (reason) cell.reason = reason;
+  }
+
+  preownerCellForIsland(hash: number, island: Island, reason?: string): void {
+    island.confirmedCells.add(hash);
+    const pos = Position.fromHash(hash);
+    const cell = this.cells[pos.y][pos.x];
+    cell.type = 'preowner';
+    cell.confirmedOwners = [island];
+    cell.ownerIsland = island;
+    if (reason) cell.reason = reason;
   }
 
   // 到達可能な未確定セルを収集
@@ -383,7 +486,15 @@ class Field {
       if (island.isFixed) continue;
 
       // 確定マスと部屋サイズが同じ場合、固定する
-      if (island.confirmedCells.size() === island.roomSize) {
+      if (island.confirmedCells.size() === island.roomSize - island.detachedSize()) {
+        // 離れ小島をすべて確定マスに変更
+        for (const di of island.detachedConfirmedCells) {
+          for (const h of di.confirmedCells.cells) {
+            this.confirmCellForIsland(h, island);
+          }
+        }
+        island.detachedConfirmedCells = [];
+
         // 部屋を囲む壁を確定
         if (this.fixIslandAndSurroundWithWalls(island)) {
           changed = true;
@@ -423,21 +534,12 @@ class Field {
 
         if (foundOwner) {
           // オーナーが見つかったら確定部屋に追加
-          for(const h of detachedIsland.confirmedCells.cells) {
-            this.confirmCellForIsland(h, foundOwner, "仮オーナー部屋が他のオーナーに隣接したため確定");
-          }
-          this.detachedIslands = this.detachedIslands.filter(di => di !== detachedIsland);
+          this.mergeIslandDetached(foundOwner, detachedIsland);
           return true; // 仮オーナー部屋を確定したらループを抜けて、analyzeを最初からやり直す
         }
         
         // 隣接するオーナーが見つからなかった場合、そのまま仮オーナー部屋として確定
-        detachedIsland.confirmedCells.add(hash);
-        const pos = Position.fromHash(hash);
-        const cell = this.cells[pos.y][pos.x];
-        cell.type = 'preowner';
-        cell.ownerIsland = detachedIsland;
-        cell.confirmedOwners = [detachedIsland];
-        cell.reason = "到達部屋リストが1つのため確定(仮オーナー)";
+        this.preownerCellForIsland(hash, detachedIsland, "到達部屋リストが1つのため確定(仮オーナー)");
 
         // もし、この部屋が他のオーナー部屋に隣接していなかったら、そのまま仮オーナー部屋として確定
         // もし、他の仮オーナーに隣接する場合、マージする
@@ -446,25 +548,7 @@ class Field {
           const adjCell = this.cells[adjPos.y][adjPos.x];
           // 仮オーナーが隣接していれば、仮オーナーグループをマージ
           if (adjCell.type === 'preowner' && adjCell.ownerIsland !== detachedIsland && adjCell.ownerIsland) {
-            // サイズを比較して、小さい方を大きい方に吸収
-            let ownerIsland = adjCell.ownerIsland;
-            let disappearingIsland = detachedIsland;
-            
-            if (detachedIsland.confirmedCells.size >= adjCell.ownerIsland.confirmedCells.size) {
-              ownerIsland = detachedIsland;
-              disappearingIsland = adjCell.ownerIsland;
-            }
-
-            for (const h of disappearingIsland.confirmedCells.cells) {
-              // hashからPositionを取得して、そのセルのownerIslandを更新
-              const pos = Position.fromHash(h);
-              this.cells[pos.y][pos.x].ownerIsland = ownerIsland;
-            }
-            // 消滅側のすべてのセルを吸収側に追加
-            ownerIsland.confirmedCells.merge(disappearingIsland.confirmedCells);
-
-            // wallGroupsから消滅側のグループを削除
-            this.detachedIslands = this.detachedIslands.filter(di => di !== disappearingIsland);
+            this.mergeTwoDetachedIslands(detachedIsland, adjCell.ownerIsland);
             changedMerge = true;
           }
         }
@@ -507,8 +591,7 @@ class Field {
       const processed = new Set<number>(island.confirmedCells.cells);
       
       // あと何部屋追加できるか
-      const preislandsize = island.detachedConfirmedCells.reduce((sum, di) => sum + di.confirmedCells.size(), 0);
-      const roomsLeft = island.roomSize - island.confirmedCells.size() - preislandsize;
+      const roomsLeft = island.remainingRoomSize();
 
       island.reachableCells.clear();
       
@@ -537,23 +620,8 @@ class Field {
         });
       }
       // 到達部屋のサイズが部屋サイズより小さい場合は矛盾
-      if (island.reachableCells.size() < island.roomSize) {
+      if (island.reachableCells.size() < island.roomSize - island.detachedSize()) {
         throw new ContradictionError(`到達可能セル矛盾: ${formatPosition(island.x, island.y)}の部屋の到達可能セルが部屋サイズに満たしていません`);
-      }
-
-      // 到達マスが部屋サイズと同じ場合、固定する
-      if (island.reachableCells.size() === island.roomSize) {
-        // 到達マスをすべて確定マスに変更
-        for (const hash of island.reachableCells.getAllCells()) {
-          if (island.confirmedCells.cells.has(hash)) continue;
-          this.confirmCellForIsland(hash, island, "確定マスと到達マスの合計が部屋サイズと同じため確定");
-        }
-        island.reachableCells.clear();
-        island.isFixed = true;
-        // 部屋を囲む壁を確定
-        if (this.fixIslandAndSurroundWithWalls(island)) { 
-          changed = true;
-        }
       }
     }
 
@@ -598,7 +666,7 @@ class Field {
       if (island.isFixed) continue;
 
       // 残りの部屋数を求める（部屋サイズ - 確定サイズ）
-      const remainingRoomSize = island.roomSize - island.confirmedCells.size();
+      const remainingRoomSize = island.remainingRoomSize();
 
       // 残り部屋サイズが0以下なら次の島へ
       if (remainingRoomSize <= 0) continue;
@@ -615,7 +683,8 @@ class Field {
         }
 
         // 候補数がトータル部屋数より多いなら繰り返しを中断
-        if (remainingRoomSize < candidatesUpToN) {
+        // 離れ小島がある場合はn=1は継続
+        if (remainingRoomSize < candidatesUpToN && (2 <= n || island.detachedConfirmedCells.length === 0)) {
           break;
         }
 
@@ -624,33 +693,29 @@ class Field {
         
         for (const assumedWallHash of cellsAtDistanceN) {
           // この壁を仮定した状態で、残りの到達可能なセルの数を調べる
-          const reachableCount = this.countReachableWithoutCell(island, assumedWallHash);
-
+          const reachable = this.countReachableWithoutCell(island, assumedWallHash);
+          // 離れ小島にとって必要なマスかチェック
+          const isNeedCell = this.isNeedCellForDetachedIslands(island, reachable);
+          
           // もし到達可能なセル数が残りの部屋数未満なら、このセルは確定セル
-          if (reachableCount < remainingRoomSize) {
+          if (isNeedCell || reachable.size < remainingRoomSize) {
+            const pos = Position.fromHash(assumedWallHash);
             if (n === 1) {
               // 距離1なら確定セルとして登録
               this.confirmCellForIsland(assumedWallHash, island, `壁仮定により確定（距離${n}）`);
             } else {
-              // 距離2以上なら仮オーナーとして登録
-              const pos = Position.fromHash(assumedWallHash);
-              const detachedIsland = new Island(this, pos.x, pos.y, 0);
-              detachedIsland.confirmedCells.cells.clear();
-              detachedIsland.confirmedCells.edgecells.clear();
-              detachedIsland.confirmedCells.add(assumedWallHash);
-              detachedIsland.confirmedCells.search = (x: number, y: number) => {
-                return this.getReachableOwnersPreowner(x, y);
-              };
-              this.detachedIslands.push(detachedIsland);
-              
-              const cell = this.cells[pos.y][pos.x];
-              cell.type = 'preowner';
-              cell.confirmedOwners = [detachedIsland];
-              cell.ownerIsland = detachedIsland;
-              cell.reason = `壁仮定により確定（距離${n}、仮オーナー）`;
+              // 距離2以上なら離れ小島として登録
+              if (this.addConfirmedCell(pos.x, pos.y, `壁仮定により確定（距離${n}、離れ小島）`)) {
+                // 追加した離れ小島と島を関連付け
+                const cell = this.cells[pos.y][pos.x];
+                if (cell.type === 'preowner' && cell.ownerIsland) {
+                  const detachedIsland = cell.ownerIsland;
+                  detachedIsland.detachedConfirmedCells = [island];
+                  island.detachedConfirmedCells.push(detachedIsland);
+                }
+              }
             }
             changed = true;
-            return changed; // 1つ確定したら戻る
           }
         }
       }
@@ -659,38 +724,31 @@ class Field {
     return changed;
   }
 
-  // 指定したセルを壁と仮定した場合、島から到達可能なセル数をカウント
-  countReachableWithoutCell(island: Island, excludeHash: number): number {
-    const processed = new Set<number>([...island.confirmedCells.cells, excludeHash]);
+  // 指定したセルを壁と仮定した場合、島から到達可能なセルを求める
+  countReachableWithoutCell(island: Island, excludeHash: number): Set<number> {
+    const processed = new Set<number>([...island.confirmedCells.cells]);
     const reachable = new Set<number>();
 
-    // BFSで到達可能なセルを探索
-    const queue: number[] = Array.from(island.confirmedCells.cells);
+    // 特定のセルを除いても到達可能セルを探索
+    for(let distance = 1; distance <= island.reachableCells.getMaxDistance(); distance++) {
+      const distanceCells = island.reachableCells.getCellsAtDistance(distance);
+      for (const hash of distanceCells) {
+        if (processed.has(hash)) continue;
+        const pos = Position.fromHash(hash);
+        const adjacents = this.getAdjacentPositions(pos.x, pos.y);
 
-    while (queue.length > 0) {
-      const currentHash = queue.shift()!;
-      const pos = Position.fromHash(currentHash);
-
-      // 隣接セルをチェック
-      const adjacents = this.getAdjacentPositions(pos.x, pos.y);
-      for (const adjPos of adjacents) {
-        const adjHash = adjPos.toHash();
-        if (processed.has(adjHash)) continue;
-
-        const adjCell = this.cells[adjPos.y][adjPos.x];
-        
-        // 未確定セルで、他のオーナーに隣接していない場合
-        if (adjCell.type === 'undecided' || adjCell.type === 'preowner') {
-          if (!this.isAdjacentToOtherOwner(adjPos.x, adjPos.y, island, island.roomSize - island.confirmedCells.size())) {
-            reachable.add(adjHash);
-            processed.add(adjHash);
-            queue.push(adjHash);
-          }
+        const reachableFromPrev = adjacents.some(adjPos => {
+          const adjHash = adjPos.toHash();
+          return processed.has(adjHash) && adjHash !== excludeHash;
+        });
+        if (reachableFromPrev) {
+          reachable.add(hash);
+          processed.add(hash);
         }
       }
     }
 
-    return reachable.size;
+    return reachable;
   }
 
   // 2x2のパターンをチェックし、3つが壁の場合残りを部屋にする
@@ -722,38 +780,9 @@ class Field {
           const targetY = targetCell.y;
           const targetHash = new Position(targetX, targetY).toHash();
 
-          // 隣接する確定マスまたはオーナーマスを探す
-          const adjacents = this.getAdjacentPositions(targetX, targetY);
-          let foundIsland: Island | null = null;
-
-          for (const adjPos of adjacents) {
-            const adjCell = this.cells[adjPos.y][adjPos.x];
-            if (adjCell.type === 'owner' && adjCell.ownerIsland) {
-              foundIsland = adjCell.ownerIsland;
-              break;
-            } else if (adjCell.type === 'confirmed' && adjCell.ownerIsland) {
-              foundIsland = adjCell.ownerIsland;
-              break;
-            }
-          }
-
-          // 隣接する島が見つかった場合、その島の確定リストに追加
-          if (foundIsland && !foundIsland.isFixed) {
-            this.confirmCellForIsland(targetHash, foundIsland, "2x2壁パターンによる確定");
+          // 確定マスまたは離れ小島として追加
+          if (this.addConfirmedCell(targetX, targetY, "2x2壁パターンによる確定")) {
             changed = true;
-          }else{
-            // 隣接する島が見つからない場合、離れ小島として登録
-            const detachedIsland = new Island(this, targetX, targetY, 0);
-            detachedIsland.confirmedCells.add(targetHash);
-            detachedIsland.confirmedCells.search = (x: number, y: number) => {
-              return this.getReachableOwnersPreowner(x, y);
-            };
-            this.detachedIslands.push(detachedIsland);
-            targetCell.cell.type = 'preowner';
-            targetCell.cell.confirmedOwners = [detachedIsland];
-            targetCell.cell.ownerIsland = detachedIsland;
-            targetCell.cell.reason = "2x2壁パターンによる確定(離れ小島)";
-            changed = true; 
           }
         }
       }
@@ -763,13 +792,13 @@ class Field {
   }
 
   // 壁を追加する処理
-  addWall(x: number, y: number, reason?: string): boolean {
+  addWall(x: number, y: number, reason: string): boolean {
     const cell = this.cells[y][x];
     if (cell.type === 'undecided') {
       this.remainingWalls--;
       cell.type = 'wall';
       const hash = new Position(x, y).toHash();
-      cell.reason = reason || "";
+      cell.reason = reason;
       cell.wallGroup = new CellGroup();
       cell.wallGroup.add(hash);
       cell.wallGroup.search = (x: number, y: number) => {
@@ -811,11 +840,96 @@ class Field {
     return false;
   }
 
-  processDetachedPreislands(): boolean {
-    // TODO: 実装予定
+  // 確定マスまたは離れ小島として追加する処理
+  addConfirmedCell(x: number, y: number, reason: string): boolean {
+    const cell = this.cells[y][x];
+    const hash = new Position(x, y).toHash();
+
+    if (cell.type === 'undecided') {
+      // 隣接する確定マスまたはオーナーマスを探す
+      const adjacents = this.getAdjacentPositions(x, y);
+      const preowners : Island [] = [];
+      let foundIsland : Island | null = null;
+
+      for (const adjPos of adjacents) {
+        const adjCell = this.cells[adjPos.y][adjPos.x];
+        if (adjCell.type === 'owner' || adjCell.type === 'confirmed' && adjCell.ownerIsland) {
+          if (!foundIsland){
+            foundIsland = adjCell.ownerIsland;
+          } else {
+            throw new ContradictionError(`確定マス矛盾: ${formatPosition(x, y)}の隣接に複数のオーナー部屋があります`);
+          }
+        } else if (adjCell.type === 'preowner' && adjCell.ownerIsland) {
+          preowners.push(adjCell.ownerIsland);
+          break;
+        }
+      }
+
+      // 隣接する島が見つかった場合、その島の確定リストに追加
+      if (foundIsland){
+        this.confirmCellForIsland(hash, foundIsland, reason);
+        for(const di of preowners) {
+          // 離れ小島も含めて確定マスに追加
+          this.mergeIslandDetached(foundIsland, di);
+        }
+        return true;
+      } else if (preowners.length > 0){
+        this.preownerCellForIsland(hash, preowners[0], reason);
+
+        for(const di of preowners.slice(1)) {
+          // 離れ小島をマージする
+          this.mergeTwoDetachedIslands(preowners[0], di);
+        }
+        return true;
+      } else {
+        // 隣接する島が見つからない場合、離れ小島として登録
+        const detachedIsland = new Island(this, x, y, 0);
+        detachedIsland.confirmedCells.add(hash);
+        detachedIsland.confirmedCells.search = (x: number, y: number) => {
+          return this.getReachableOwnersPreowner(x, y);
+        };
+        this.detachedIslands.push(detachedIsland);
+        this.preownerCellForIsland(hash, detachedIsland, reason);
+        return true;
+      }
+    }
     return false;
   }
 
+  processDetachedPreislands(): boolean {
+    let result = false;
+
+    for (const detachedIsland of this.detachedIslands) {
+      const detachedIslandHash = new Position(detachedIsland.x, detachedIsland.y).toHash();
+
+      // すでにどこかの島に属した場合はスキップ
+      if (0 < detachedIsland.detachedConfirmedCells.length) continue;
+
+      // 候補の島を見つける
+      const islands = this.islands.filter(island => {
+        // 固定されている島は除外
+        if (island.isFixed) return false;
+
+        // 離れ小島からの距離が部屋サイズ以上なら除外
+        const distances = Math.abs(detachedIsland.x - island.x) + Math.abs(detachedIsland.y - island.y);
+        if (island.roomSize <= distances) return false;
+
+        // 到達候補の中に離れ小島が含まれていなければ除外
+        if (!island.reachableCells.has(detachedIslandHash)) return false;
+
+        return true;
+      });
+
+      if (islands.length === 1){
+        const island = islands[0];
+        // 候補が1つだけなら、その島に確定
+        island.detachedConfirmedCells.push(detachedIsland);
+        detachedIsland.detachedConfirmedCells.push(island);
+        result = true;
+      }
+    }
+    return result;
+  }
 
   // 解析処理のメイン
   analyze(): boolean {
@@ -981,6 +1095,12 @@ class Field {
 // 座標を表示用の文字列に変換する関数（1-originで表示）
 const formatPosition = (x: number, y: number): string => {
   return `(${x + 1},${y + 1})`;
+};
+
+// ハッシュ値から座標を表示用の文字列に変換する関数
+const formatPositionFromHash = (hash: number): string => {
+  const pos = Position.fromHash(hash);
+  return formatPosition(pos.x, pos.y);
 };
 
 export default function NurikabePage() {
@@ -1311,44 +1431,10 @@ export default function NurikabePage() {
         field.addWall(pos.x, pos.y, "手動壁による確定");
       }
       
-      // 手動確定マスを追加（2x2壁パターンと同様の処理）
+      // 手動確定マスを追加
       for (const hash of manualEmptyCells) {
         const pos = Position.fromHash(hash);
-        const targetX = pos.x;
-        const targetY = pos.y;
-        
-        // 隣接する確定マスまたはオーナーマスを探す
-        const adjacents = field.getAdjacentPositions(targetX, targetY);
-        let foundIsland: Island | null = null;
-
-        for (const adjPos of adjacents) {
-          const adjCell = field.cells[adjPos.y][adjPos.x];
-          if (adjCell.type === 'owner' && adjCell.ownerIsland) {
-            foundIsland = adjCell.ownerIsland;
-            break;
-          } else if (adjCell.type === 'confirmed' && adjCell.ownerIsland) {
-            foundIsland = adjCell.ownerIsland;
-            break;
-          }
-        }
-
-        // 隣接する島が見つかった場合、その島の確定リストに追加
-        if (foundIsland && !foundIsland.isFixed) {
-          field.confirmCellForIsland(hash, foundIsland, "手動確定マスによる確定");
-        } else {
-          // 隣接する島が見つからない場合、離れ小島として登録
-          const detachedIsland = new Island(field, targetX, targetY, 0);
-          detachedIsland.confirmedCells.add(hash);
-          detachedIsland.confirmedCells.search = (x: number, y: number) => {
-            return field.getReachableOwnersPreowner(x, y);
-          };
-          field.detachedIslands.push(detachedIsland);
-          const cell = field.cells[targetY][targetX];
-          cell.type = 'preowner';
-          cell.confirmedOwners = [detachedIsland];
-          cell.ownerIsland = detachedIsland;
-          cell.reason = "手動確定マスによる確定(離れ小島)";
-        }
+        field.addConfirmedCell(pos.x, pos.y, "手動確定マスによる確定");
       }
       
       // 解析を続行
@@ -1730,6 +1816,22 @@ export default function NurikabePage() {
                   <p><strong>確定マス数：</strong>{cell.ownerIsland.confirmedCells.size()}</p>
                   <p><strong>到達マス数：</strong>{cell.ownerIsland.reachableCells.size()}</p>
                   <p><strong>固定状態：</strong>{cell.ownerIsland.isFixed ? '固定済み' : '未固定'}</p>
+                  {cell.ownerIsland.detachedConfirmedCells.length > 0 && (
+                    <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded">
+                      <p className="font-semibold">離れ小島 ({cell.ownerIsland.detachedConfirmedCells.length}個):</p>
+                      {cell.ownerIsland.detachedConfirmedCells.map((detached, idx) => (
+                        <div key={idx} className="ml-4 mt-1 text-sm">
+                          <p>#{idx + 1}: 位置 {formatPosition(detached.x, detached.y)}, 確定マス数: {detached.confirmedCells.size()}</p>
+                          <p className="text-xs text-gray-600 ml-2">
+                            座標: {Array.from(detached.confirmedCells.cells).map(hash => {
+                              const pos = Position.fromHash(hash);
+                              return formatPosition(pos.x, pos.y);
+                            }).join(', ')}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {cell.reason && <p><strong>確定理由：</strong>{cell.reason}</p>}
                 </div>
               );
