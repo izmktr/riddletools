@@ -1106,6 +1106,8 @@ const formatPositionFromHash = (hash: number): string => {
 export default function NurikabePage() {
   const [width, setWidth] = useState(8);
   const [height, setHeight] = useState(8);
+  const [inputWidth, setInputWidth] = useState("8");
+  const [inputHeight, setInputHeight] = useState("8");
   const [board, setBoard] = useState<CellValue[][]>(() => 
     Array(8).fill(null).map(() => Array(8).fill(null))
   );
@@ -1207,11 +1209,20 @@ export default function NurikabePage() {
 
   // 盤面サイズ変更
   const handleSizeChange = () => {
-    const newBoard: CellValue[][] = Array(height).fill(null).map(() => Array(width).fill(null));
+    // 入力値をパースして適用
+    const newWidth = Math.max(3, Math.min(20, parseInt(inputWidth) || 3));
+    const newHeight = Math.max(3, Math.min(20, parseInt(inputHeight) || 3));
+    
+    setWidth(newWidth);
+    setHeight(newHeight);
+    setInputWidth(newWidth.toString());
+    setInputHeight(newHeight.toString());
+    
+    const newBoard: CellValue[][] = Array(newHeight).fill(null).map(() => Array(newWidth).fill(null));
     
     // 既存のデータを可能な範囲でコピー
-    for (let row = 0; row < Math.min(height, board.length); row++) {
-      for (let col = 0; col < Math.min(width, board[0]?.length || 0); col++) {
+    for (let row = 0; row < Math.min(newHeight, board.length); row++) {
+      for (let col = 0; col < Math.min(newWidth, board[0]?.length || 0); col++) {
         newBoard[row][col] = board[row][col];
       }
     }
@@ -1620,8 +1631,8 @@ export default function NurikabePage() {
             type="number"
             min="3"
             max="20"
-            value={width}
-            onChange={e => setWidth(Math.max(3, Math.min(20, parseInt(e.target.value) || 3)))}
+            value={inputWidth}
+            onChange={e => setInputWidth(e.target.value)}
             className="w-16 p-1 border rounded"
           />
         </div>
@@ -1631,8 +1642,8 @@ export default function NurikabePage() {
             type="number"
             min="3"
             max="20"
-            value={height}
-            onChange={e => setHeight(Math.max(3, Math.min(20, parseInt(e.target.value) || 3)))}
+            value={inputHeight}
+            onChange={e => setInputHeight(e.target.value)}
             className="w-16 p-1 border rounded"
           />
         </div>
