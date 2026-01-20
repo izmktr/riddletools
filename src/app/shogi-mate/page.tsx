@@ -1434,7 +1434,7 @@ export default function ShogiMatePage() {
   };
 
   return (
-    <main className="max-w-6xl mx-auto p-6">
+    <main className="max-w-7xl mx-auto px-4 py-6">
       <div className="flex items-center mb-4 gap-2">
         <Link href="/" className="inline-block px-4 py-2 bg-gray-100 rounded hover:bg-gray-200">トップに戻る</Link>
       </div>
@@ -1442,7 +1442,7 @@ export default function ShogiMatePage() {
       <h2 className="text-2xl font-bold mb-4">詰将棋ソルバー</h2>
 
       {/* ボタン */}
-      <div className="mb-4 flex gap-2 items-center">
+      <div className="mb-4 flex flex-wrap gap-2 items-center">
         {!viewMode ? (
           <>
             <button
@@ -1500,7 +1500,7 @@ export default function ShogiMatePage() {
         )}
       </div>
 
-      <div className="flex gap-8">
+      <div className="flex flex-col lg:flex-row gap-8">
         {/* 盤面と持ち駒 */}
         <div>
           <h3 className="font-semibold mb-2">盤面{viewMode ? '' : '（クリックで選択）'}</h3>
@@ -1509,7 +1509,7 @@ export default function ShogiMatePage() {
             <div className="flex">
               <div className="w-6"></div> {/* 左上の空白 */}
               {[9, 8, 7, 6, 5, 4, 3, 2, 1].map(col => (
-                <div key={col} className="w-12 text-center text-sm font-semibold">{col}</div>
+                <div key={col} className="w-8 sm:w-10 lg:w-12 text-center text-xs sm:text-sm font-semibold">{col}</div>
               ))}
             </div>
             {/* 盤面 */}
@@ -1560,7 +1560,7 @@ export default function ShogiMatePage() {
                   return (
                     <div
                       key={`${rowIndex}-${colIndex}`}
-                      className={`w-12 h-12 border border-amber-900 flex items-center justify-center text-xl font-bold relative
+                      className={`w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 border border-amber-900 flex items-center justify-center text-base sm:text-lg lg:text-xl font-bold relative
                         ${!viewMode ? 'cursor-pointer' : (candidateMove || isPieceSelectable) ? 'cursor-pointer' : ''}
                         ${isSelected && !viewMode ? 'bg-yellow-300' : 
                           isLastMovedPiece ? 'bg-red-100' :
@@ -1652,7 +1652,7 @@ export default function ShogiMatePage() {
               {/* 行番号（右側） */}
               <div className="ml-1">
                 {[0, 1, 2, 3, 4, 5, 6, 7, 8].map(row => (
-                  <div key={row} className="h-12 flex items-center text-sm font-semibold">
+                  <div key={row} className="h-8 sm:h-10 lg:h-12 flex items-center text-xs sm:text-sm font-semibold">
                     {KANJI_NUMBERS[row + 1]}
                   </div>
                 ))}
@@ -1673,7 +1673,7 @@ export default function ShogiMatePage() {
                 return (
                   <div
                     key={index}
-                    className={`w-12 h-12 border-2 border-blue-700 bg-blue-50 flex items-center justify-center text-xl font-bold text-blue-700
+                    className={`w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 border-2 border-blue-700 bg-blue-50 flex items-center justify-center text-base sm:text-lg lg:text-xl font-bold text-blue-700
                       ${viewMode ? (isCapturedSelectable ? 'cursor-pointer' : '') : 'cursor-pointer'}
                       ${!viewMode && selectedCapturedIndex === index ? 'bg-yellow-300 border-yellow-500' : 
                         isSelectedCaptured ? 'bg-yellow-300 border-yellow-500' : ''}
@@ -1695,7 +1695,7 @@ export default function ShogiMatePage() {
               {/* 空欄 */}
               {!viewMode && (
                 <div
-                  className={`w-12 h-12 border-2 border-dashed border-gray-400 bg-gray-50 cursor-pointer flex items-center justify-center text-xl
+                  className={`w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 border-2 border-dashed border-gray-400 bg-gray-50 cursor-pointer flex items-center justify-center text-base sm:text-lg lg:text-xl
                     ${selectedCapturedIndex === capturedPieces.length ? 'bg-yellow-300 border-yellow-500' : 'hover:bg-gray-100'}
                   `}
                   onClick={() => handleCapturedClick(capturedPieces.length)}
@@ -1715,7 +1715,7 @@ export default function ShogiMatePage() {
             {/* 相手の駒 */}
             <div>
               <p className="text-sm font-semibold mb-1 text-red-700">相手の駒（上向き）</p>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                 {PIECE_TYPES.map(pieceType => (
                   <button
                     key={`opponent-${pieceType}`}
@@ -1734,7 +1734,7 @@ export default function ShogiMatePage() {
             {/* 自分の駒 */}
             <div>
               <p className="text-sm font-semibold mb-1 text-blue-700">自分の駒（下向き）</p>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                 {PIECE_TYPES.map(pieceType => (
                   <button
                     key={`self-${pieceType}`}
@@ -1898,15 +1898,15 @@ export default function ShogiMatePage() {
 
       {/* エクスポートモーダル */}
       {showExport && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative">
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded shadow-lg p-4 sm:p-6 max-w-lg w-full relative">
             <button
               className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
               onClick={() => setShowExport(false)}
             >閉じる</button>
             <h3 className="text-xl font-bold mb-4">エクスポート</h3>
             <textarea
-              className="w-full h-64 p-2 border rounded font-mono text-sm"
+              className="w-full h-48 sm:h-64 p-2 border rounded font-mono text-sm"
               value={exportText}
               readOnly
             />
@@ -1926,8 +1926,8 @@ export default function ShogiMatePage() {
 
       {/* インポートモーダル */}
       {showImport && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative">
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded shadow-lg p-4 sm:p-6 max-w-lg w-full relative">
             <button
               className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
               onClick={() => setShowImport(false)}
@@ -1935,7 +1935,7 @@ export default function ShogiMatePage() {
             <h3 className="text-xl font-bold mb-4">インポート</h3>
             <p className="text-sm text-gray-600 mb-2">形式: x y 側(S/O) 駒種類</p>
             <textarea
-              className="w-full h-64 p-2 border rounded font-mono text-sm"
+              className="w-full h-48 sm:h-64 p-2 border rounded font-mono text-sm"
               value={importText}
               onChange={(e) => setImportText(e.target.value)}
               placeholder="例:\n1 1 O 香\n5 9 S 王\nCAPTURED: 歩,銀"
