@@ -1255,6 +1255,14 @@ export default function NurikabePage() {
   // セルクリック時の処理
   const handleCellClick = (row: number, col: number) => {
     if (isAnalyzeMode) {
+      // 同じセルをクリックした場合は選択解除
+      if (selectedCell && selectedCell.x === col && selectedCell.y === row) {
+        setSelectedCell(null);
+        setHighlightedCells(new Set());
+        setSelectedCellDistances(new Map());
+        return;
+      }
+      
       // 解析モード：セル情報を表示
       setSelectedCell({x: col, y: row});
       
@@ -1834,10 +1842,12 @@ export default function NurikabePage() {
       </div>
 
       {/* セル情報表示 */}
-      {isAnalyzeMode && selectedCell && field && (
+      {isAnalyzeMode && field && (
         <div className="mb-4 p-4 border-2 border-gray-300 rounded bg-gray-50">
-          <h3 className="font-semibold mb-2">セル情報 {formatPosition(selectedCell.x, selectedCell.y)}</h3>
-          {(() => {
+          <h3 className="font-semibold mb-2">
+            セル情報 {selectedCell ? formatPosition(selectedCell.x, selectedCell.y) : '未選択'}
+          </h3>
+          {selectedCell ? (() => {
             const cell = field.cells[selectedCell.y][selectedCell.x];
             
             if (cell.type === 'owner' && cell.ownerIsland) {
@@ -1917,7 +1927,9 @@ export default function NurikabePage() {
                 </div>
               );
             }
-          })()}
+          })() : (
+            <p className="text-gray-500">クリックしてセルを選択してください</p>
+          )}
         </div>
       )}
 
