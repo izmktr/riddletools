@@ -707,7 +707,7 @@ class Field {
           const reachable = this.countReachableWithoutCell(island, assumedWallHash);
           // 離れ小島にとって必要なマスかチェック
           const isNeedCell = this.isNeedCellForDetachedIslands(island, reachable);
-          
+
           // もし到達可能なセル数が残りの部屋数未満なら、このセルは確定セル
           if (isNeedCell || reachable.size < remainingRoomSize) {
             const pos = Position.fromHash(assumedWallHash);
@@ -743,14 +743,15 @@ class Field {
     // 特定のセルを除いても到達可能セルを探索
     for(let distance = 1; distance <= island.reachableCells.getMaxDistance(); distance++) {
       const distanceCells = island.reachableCells.getCellsAtDistance(distance);
+
       for (const hash of distanceCells) {
-        if (processed.has(hash)) continue;
+        if (hash === excludeHash) continue;
         const pos = Position.fromHash(hash);
         const adjacents = this.getAdjacentPositions(pos.x, pos.y);
 
         const reachableFromPrev = adjacents.some(adjPos => {
           const adjHash = adjPos.toHash();
-          return processed.has(adjHash) && adjHash !== excludeHash;
+          return processed.has(adjHash);
         });
         if (reachableFromPrev) {
           reachable.add(hash);
