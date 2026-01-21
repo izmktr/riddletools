@@ -500,7 +500,7 @@ class Field {
       // 到達可能セルと部屋サイズが同じで、離れ小島がない場合、確定マスに追加
       if (island.reachableCells.size() == island.roomSize && island.detachedConfirmedCells.length === 0) {
         for (const hash of island.reachableCells.getCellsExcludingConfirmed()) {
-          this.confirmCellForIsland(hash, island);
+          this.confirmCellForIsland(hash, island, "到達可能セル数と部屋サイズが同じのため確定");
         }
       }
 
@@ -713,7 +713,7 @@ class Field {
             const pos = Position.fromHash(assumedWallHash);
             if (n === 1) {
               // 距離1なら確定セルとして登録
-              this.confirmCellForIsland(assumedWallHash, island, `壁仮定により確定（距離${n}）`);
+              this.addConfirmedCell(pos.x, pos.y, `壁仮定により確定（距離${n}）`);
             } else {
               // 距離2以上なら離れ小島として登録
               if (this.addConfirmedCell(pos.x, pos.y, `壁仮定により確定（距離${n}、離れ小島）`)) {
@@ -863,7 +863,7 @@ class Field {
 
       for (const adjPos of adjacents) {
         const adjCell = this.cells[adjPos.y][adjPos.x];
-        if (adjCell.type === 'owner' || adjCell.type === 'confirmed' && adjCell.ownerIsland) {
+        if ((adjCell.type === 'owner' || adjCell.type === 'confirmed') && adjCell.ownerIsland) {
           if (!foundIsland){
             foundIsland = adjCell.ownerIsland;
           } else {
@@ -871,7 +871,6 @@ class Field {
           }
         } else if (adjCell.type === 'preowner' && adjCell.ownerIsland) {
           preowners.push(adjCell.ownerIsland);
-          break;
         }
       }
 
