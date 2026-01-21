@@ -82,6 +82,18 @@ class ReachableCellsByDistance {
     return allCells;
   }
 
+  // 確定マスを除いたセルを取得(距離1以上のセル)
+  getCellsExcludingConfirmed(): Set<number> {
+    const cells = new Set<number>();
+    for (const distance of this.cellsByDistance.keys()) {
+      if (distance === 0) continue;
+      for (const hash of this.cellsByDistance.get(distance)!) {
+        cells.add(hash);
+      }
+    }
+    return cells;
+  }
+
   // 最大距離を取得
   getMaxDistance(): number {
     return Math.max(-1, ...Array.from(this.cellsByDistance.keys()));
@@ -485,16 +497,15 @@ class Field {
     for (const island of this.islands) {
       if (island.isFixed) continue;
 
-      // 確定マスと部屋サイズが同じ場合、固定する
-      if (island.confirmedCells.size() === island.roomSize - island.detachedSize()) {
-        // 離れ小島をすべて確定マスに変更
-        for (const di of island.detachedConfirmedCells) {
-          for (const h of di.confirmedCells.cells) {
-            this.confirmCellForIsland(h, island);
-          }
+      // 到達可能セルと部屋サイズが同じで、離れ小島がない場合、確定マスに追加
+      if (island.reachableCells.size() == island.roomSize && island.detachedConfirmedCells.length === 0) {
+        for (const hash of island.reachableCells.getCellsExcludingConfirmed()) {
+          this.confirmCellForIsland(hash, island);
         }
-        island.detachedConfirmedCells = [];
+      }
 
+      // 確定マスと部屋サイズが同じ場合、固定する
+      if (island.confirmedCells.size() === island.roomSize) {
         // 部屋を囲む壁を確定
         if (this.fixIslandAndSurroundWithWalls(island)) {
           changed = true;
@@ -902,7 +913,7 @@ class Field {
       const detachedIslandHash = new Position(detachedIsland.x, detachedIsland.y).toHash();
 
       // すでにどこかの島に属した場合はスキップ
-      if (0 < detachedIsland.detachedConfirmedCells.length) continue;
+      if (detachedIsland.detachedConfirmedCells.length == 1) continue;
 
       // 候補の島を見つける
       const islands = this.islands.filter(island => {
@@ -923,8 +934,10 @@ class Field {
         const island = islands[0];
         // 候補が1つだけなら、その島に確定
         island.detachedConfirmedCells.push(detachedIsland);
-        detachedIsland.detachedConfirmedCells.push(island);
+        detachedIsland.detachedConfirmedCells = islands;
         result = true;
+      }else if (islands.length > 1){
+        detachedIsland.detachedConfirmedCells = islands;
       }
     }
     return result;
@@ -1269,6 +1282,14 @@ export default function NurikabePage() {
         // 仮オーナー部屋：仮オーナーのconfirmedCellsをハイライト
         for (const hash of cell.ownerIsland.confirmedCells.cells) {
           highlighted.add(hash);
+          distances.set(hash, 0);
+        }
+        // detachedConfirmedCellsの島のセルもハイライト（距離1として表示）
+        for (const island of cell.ownerIsland.detachedConfirmedCells) {
+          for (const hash of island.confirmedCells.cells) {
+            highlighted.add(hash);
+            distances.set(hash, 1);
+          }
         }
       } else if (cell.type === 'confirmed') {
         // 確定部屋：すべての確定オーナーのセルをハイライト
@@ -1851,6 +1872,16 @@ export default function NurikabePage() {
                 <div>
                   <p><strong>種類：</strong>仮オーナー部屋</p>
                   <p><strong>確定マス数：</strong>{cell.ownerIsland ? cell.ownerIsland.confirmedCells.size() : 0}</p>
+                  {cell.ownerIsland && cell.ownerIsland.detachedConfirmedCells.length > 0 && (
+                    <div className="mt-2 p-2 bg-purple-50 border border-purple-200 rounded">
+                      <p className="font-semibold">関連する島 ({cell.ownerIsland.detachedConfirmedCells.length}個):</p>
+                      {cell.ownerIsland.detachedConfirmedCells.map((island, idx) => (
+                        <div key={idx} className="ml-4 mt-1 text-sm">
+                          <p>#{idx + 1}: 位置 {formatPosition(island.x, island.y)}, 部屋サイズ: {island.roomSize}, 確定マス数: {island.confirmedCells.size()}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {cell.reason && <p><strong>確定理由：</strong>{cell.reason}</p>}
                 </div>
               );
