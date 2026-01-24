@@ -305,6 +305,7 @@ class Field {
     // 離れ小島リストから削除
     this.detachedIslands = this.detachedIslands.filter(di => di !== detachedIsland);
     // もし、島が離れ小島リストに含まれていたら削除
+
     targetIsland.detachedConfirmedCells = targetIsland.detachedConfirmedCells.filter(di => di !== detachedIsland);
   }
 
@@ -329,6 +330,11 @@ class Field {
     }
     // 消滅側のすべてのセルを吸収側に追加
     absorbingIsland.confirmedCells.merge(disappearingIsland.confirmedCells);
+
+    // 消滅側の離れ小島の情報を消す
+    for(const di of disappearingIsland.detachedConfirmedCells){
+      di.detachedConfirmedCells = di.detachedConfirmedCells.filter(detachedIsland => detachedIsland !== disappearingIsland);
+    }
 
     // detachedIslandsから消滅側のグループを削除
     this.detachedIslands = this.detachedIslands.filter(di => di !== disappearingIsland);
@@ -437,6 +443,7 @@ class Field {
   collectReachableCells(island: Island, cellgroup: CellGroup, reachable: Set<number>, processed: Set<number>, restsize: number): void {
     for (const hash of cellgroup.getAdjacent()) {
       if (processed.has(hash)) continue;
+      processed.add(hash);
 
       const adjPos = Position.fromHash(hash);
 
@@ -496,13 +503,6 @@ class Field {
 
     for (const island of this.islands) {
       if (island.isFixed) continue;
-
-      // 到達可能セルと部屋サイズが同じで、離れ小島がない場合、確定マスに追加
-      if (island.reachableCells.size() == island.roomSize && island.detachedConfirmedCells.length === 0) {
-        for (const hash of island.reachableCells.getCellsExcludingConfirmed()) {
-          this.confirmCellForIsland(hash, island, "到達可能セル数と部屋サイズが同じのため確定");
-        }
-      }
 
       // 確定マスと部屋サイズが同じ場合、固定する
       if (island.confirmedCells.size() === island.roomSize) {
@@ -595,7 +595,7 @@ class Field {
 
   // 到達可能リストを計算し、島を固定する処理
   calculateReachableAndFixIslands(): boolean {
-    const changed = false;
+    let changed = false;
 
     for (const island of this.islands) {
       if (island.isFixed) continue;
@@ -631,9 +631,20 @@ class Field {
         });
       }
       // 到達部屋のサイズが部屋サイズより小さい場合は矛盾
-      if (island.reachableCells.size() < island.roomSize - island.detachedSize()) {
+
+      const totalsize = island.reachableCells.size() + island.detachedSize();
+      if (totalsize< island.roomSize) {
         throw new ContradictionError(`到達可能セル矛盾: ${formatPosition(island.x, island.y)}の部屋の到達可能セルが部屋サイズに満たしていません`);
       }
+
+      // 到達可能セルと部屋サイズが同じで、離れ小島がない場合、確定マスに追加
+      if (totalsize === island.roomSize) {
+       for (const hash of island.reachableCells.getCellsExcludingConfirmed()) {
+          this.confirmCellForIsland(hash, island, "到達可能セル数と部屋サイズが同じのため確定");
+        }
+        changed = true;
+      }
+
     }
 
     return changed;
