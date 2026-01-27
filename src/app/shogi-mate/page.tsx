@@ -1271,6 +1271,8 @@ export default function ShogiMatePage() {
         return '【成功】';
       case 'failure':
         return '【失敗】';
+      case 'none':
+        return '【未解析】';
       default:
         return '';
     }
