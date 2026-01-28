@@ -385,7 +385,7 @@ export default function ShogiMatePage() {
   }
   
   function isEnemyField(hash: number): boolean {
-    return hash <= 2 * 9;
+    return hash < 3 * 9;
   }
 
   function areAdjacent(pos1: number, pos2: number): boolean {
@@ -1304,18 +1304,23 @@ export default function ShogiMatePage() {
     }
   };
 
+  function formatPositionFromHash(hash: number): string {
+    const [row, col] = FromHash(hash);
+    return `${9 - col}${KANJI_NUMBERS[row + 1]}`;
+  }
+
   // 手を文字列化
   const formatMove = (move: MovePiece, success: boolean = false): string => {
     const str = (success ? StatusFormat(move.getStatus()) : '');
 
     if (move.from === null) {
-      return `${move.step + 1}手: ${move.to.toString()}${move.piece}打` + str;
+      return `${move.step + 1}手: ${formatPositionFromHash(move.to)}${move.piece}打` + str;
     } else if (move.from) {
       if (move.change) {
         const actualPiece = UNPROMOTED_MAP[move.piece as string];
-        return `${move.step + 1}手: ${move.to.toString()}${actualPiece}成 [${move.from.toString()}]` + str;
+        return `${move.step + 1}手: ${formatPositionFromHash(move.to)}${actualPiece}成 [${formatPositionFromHash(move.from)}]` + str;
       }
-      return `${move.step + 1}手: ${move.to.toString()}${move.piece} [${move.from.toString()}]` + str;
+      return `${move.step + 1}手: ${formatPositionFromHash(move.to)}${move.piece} [${formatPositionFromHash(move.from)}]` + str;
     }
     return '';
   };
