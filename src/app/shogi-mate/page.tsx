@@ -374,6 +374,26 @@ export default function ShogiMatePage() {
     }
   };
 
+  function ToHash(row: number, col: number): number {
+    return row * 9 + col;
+  }
+
+  // ハッシュ値から行と列を取得
+  // 戻り値: [行(row), 列(col)]
+  function FromHash(hash: number): [number, number] {
+    return [Math.floor(hash / 9), hash % 9];
+  }
+  
+  function isEnemyField(hash: number): boolean {
+    return hash <= 2 * 9;
+  }
+
+  function areAdjacent(pos1: number, pos2: number): boolean {
+    const [row1, col1] = FromHash(pos1);
+    const [row2, col2] = FromHash(pos2);
+    return Math.abs(row1 - row2) <= 1 && Math.abs(col1 - col2) <= 1;
+  }
+
   // 座標クラス
   class Coordinate {
     row: number;
@@ -410,8 +430,8 @@ export default function ShogiMatePage() {
   class MovePiece {
     step: number;
     piece: PieceType
-    from: Coordinate | null;
-    to: Coordinate;
+    from: number | null;
+    to: number;
     change : boolean;
     prevMove : MovePiece | null = null;
     nextMove : MovePiece [] = [];
@@ -420,7 +440,7 @@ export default function ShogiMatePage() {
     redirectedList: MovePiece [] = [];  // 自分にリダイレクトしている手のリスト
     successMove: MovePiece | null = null; // 成功手筋の場合の次の手
 
-    constructor(step: number, piece: PieceType, from: Coordinate | null, to: Coordinate, prevMove: MovePiece | null, change: boolean = false) {
+    constructor(step: number, piece: PieceType, from: number | null, to: number, prevMove: MovePiece | null, change: boolean = false) {
       this.step = step;
       this.piece = piece;
       this.from = from;
@@ -478,9 +498,9 @@ export default function ShogiMatePage() {
 
   // 座標と駒タイプのペア
   class PiecePosition {
-    position: Coordinate | null;
+    position: number | null;
     piece: PieceType;
-    constructor(position: Coordinate, piece: PieceType) {
+    constructor(position: number | null, piece: PieceType) {
       this.position = position;
       this.piece = piece;
     }
@@ -599,13 +619,8 @@ export default function ShogiMatePage() {
 
     // フィールドのコピーを作成
     clone(): Field {
-      const cloneCoordinate = (coord: Coordinate | null): Coordinate | null => {
-        if (!coord) return null;
-        return new Coordinate(coord.row, coord.col);
-      };
-      
       const clonePiecePosition = (pp: PiecePosition): PiecePosition => {
-        return new PiecePosition(cloneCoordinate(pp.position)!, pp.piece);
+        return new PiecePosition(pp.position, pp.piece);
       };
       
       const newOpponentKing = clonePiecePosition(this.opponentking);
@@ -645,7 +660,7 @@ export default function ShogiMatePage() {
           const opponent = mv.IsSelfStep() ? newField.opponentpieces : newField.selfpieces;
 
           const fromIndex = current.findIndex(
-            pp => pp.position?.row === mv.from?.row && pp.position?.col === mv.from?.col
+            pp => pp.position === mv.from
           );
           if (fromIndex !== -1) {
             current[fromIndex].position = mv.to;
@@ -656,7 +671,7 @@ export default function ShogiMatePage() {
           
           // 移動先に相手の駒がある場合、取る
           const opponentIndex = opponent.findIndex(
-            pp => pp.position?.row === mv.to.row && pp.position?.col === mv.to.col
+            pp => pp.position === mv.to
           );
           if (opponentIndex !== -1) {
             const capturedPiece = opponent[opponentIndex].piece;
@@ -697,7 +712,7 @@ export default function ShogiMatePage() {
         for (let col = 0; col < 9; col++) {
           const piece = board[row][col];
           if (piece && piece.type) {
-            const position = new Coordinate(row, col);
+            const position = ToHash(row, col);
             const piecePos = new PiecePosition(position, piece.type);
 
             if (piece.side === 'opponent') {
@@ -729,12 +744,12 @@ export default function ShogiMatePage() {
     }
 
     // FieldからBoard配列を作成
-    toBoard(): (Piece | null)[][] {
-      const board: (Piece | null)[][] = Array(9).fill(null).map(() => Array(9).fill(null));
+    toBoard(): (Piece | null)[] {
+      const board: (Piece | null)[] = Array(81).fill(null);
       
       // 相手の玉を配置
       if (this.opponentking.position) {
-        board[this.opponentking.position.row][this.opponentking.position.col] = {
+        board[this.opponentking.position] = {
           type: this.opponentking.piece,
           side: 'opponent'
         };
@@ -743,7 +758,7 @@ export default function ShogiMatePage() {
       // 相手の駒を配置
       for (const pp of this.opponentpieces) {
         if (pp.position) {
-          board[pp.position.row][pp.position.col] = {
+          board[pp.position] = {
             type: pp.piece,
             side: 'opponent'
           };
@@ -753,7 +768,7 @@ export default function ShogiMatePage() {
       // 自分の駒を配置
       for (const pp of this.selfpieces) {
         if (pp.position) {
-          board[pp.position.row][pp.position.col] = {
+          board[pp.position] = {
             type: pp.piece,
             side: 'self'
           };
@@ -766,22 +781,28 @@ export default function ShogiMatePage() {
 
   // FieldからBoard配列を作成する関数
   const fieldToBoard = (field: Field): (Piece | null)[][] => {
-    return field.toBoard();
+    const result = Array(9).fill(null).map(() => Array(9).fill(null));
+    const boardArray = field.toBoard();
+    for (let i = 0; i < 81; i++) {
+      const [col, row] = FromHash(i);
+      result[col][row] = boardArray[i];
+    }
+    return result;
   };
 
   // Fieldをハッシュ文字列に変換（トランスポジション検出用）
   const hashField = (field: Field, side: string): string => {
     // 自分の駒を位置でソートして文字列化
     const selfPieces = field.selfpieces
-      .filter(pp => pp.position)
-      .map(pp => `${pp.position!.row}${pp.position!.col}${pp.piece}`)
+      .filter(pp => pp.position !== null)
+      .map(pp => `${pp.position}${pp.piece}`)
       .sort()
       .join('|');
     
     // 相手の駒を位置でソートして文字列化
     const opponentPieces = field.opponentpieces
-      .filter(pp => pp.position)
-      .map(pp => `${pp.position!.row}${pp.position!.col}${pp.piece}`)
+      .filter(pp => pp.position !== null)
+      .map(pp => `${pp.position}${pp.piece}`)
       .sort()
       .join('|');
     
@@ -1061,22 +1082,24 @@ export default function ShogiMatePage() {
   };
 
   // 駒の移動先を取得
-  const getPieceMoves = (board: (Piece | null)[][], pos : Coordinate, pieceType : PieceType, side : Side = 'self', trample :boolean = false): Coordinate[] => {
-    const moves: Coordinate[] = [];
+  const getPieceMoves = (board: (Piece | null)[], pos : number, pieceType : PieceType, side : Side = 'self', trample :boolean = false): number[] => {
+    const moves: number[] = [];
     const directions = getPieceDirections(pieceType, side);
     
+    const [row, col] = FromHash(pos);
     for (const [dr, dc, range] of directions) {
       for (let i = 1; i <= range; i++) {
-        const newRow = pos.row + dr * i;
-        const newCol = pos.col + dc * i;
+        const newRow = row + dr * i;
+        const newCol = col + dc * i;
+        const newpos = ToHash(newRow, newCol);
         
         if (newRow < 0 || newRow >= 9 || newCol < 0 || newCol >= 9) break;
         
-        const target = board[newRow][newCol];
+        const target = board[newpos];
         // trampleがtrueの場合、自分の駒にも移動できる
         if (target && target.side === side && !trample && (side !== 'self' || target.type !== '玉')) break;
         
-        moves.push(new Coordinate(newRow, newCol));
+        moves.push(newpos);
         
         // 自分の場合、玉を貫通する
         if (target && (side !== 'self' || target.type !== '玉')) break; // 相手の駒で止まる
@@ -1127,8 +1150,8 @@ export default function ShogiMatePage() {
   const generateSelfMoves = (field: Field, steps : number, prevMove: MovePiece | null): MovePiece[] => {
     const moves: MovePiece[] = [];
     
-    const board = fieldToBoard(field);
-    const kingpos = field.opponentking.position ?? new Coordinate(0, 0);
+    const board = field.toBoard();
+    const kingpos = field.opponentking.position ?? 0;
     // 盤上の駒の移動
     field.selfpieces.forEach(pp => {
       // 自分の駒の移動範囲を取得
@@ -1140,7 +1163,7 @@ export default function ShogiMatePage() {
         const kingMoveList = getPieceMoves(board, kingpos, pp.piece, 'opponent', true);
         // この2つが重なった場所が王手の範囲
         pieceMoves.forEach(move => {
-          if (kingMoveList.some(km => km.row === move.row && km.col === move.col)) {
+          if (kingMoveList.some(km => km === move)) {
             moves.push(new MovePiece(steps, pp.piece, pos, move, prevMove));
           }
         });
@@ -1150,17 +1173,17 @@ export default function ShogiMatePage() {
 
           // 王手の範囲を取得
           const kingMovePromotedList = getPieceMoves(board, kingpos, promotedType, 'opponent', true);
-          if (pos.isEnemyField()) {
+          if (isEnemyField(pos)) {
             // この2つが重なった場所が王手の範囲
             pieceMoves.forEach(move => {
-              if (kingMovePromotedList.some(km => km.row === move.row && km.col === move.col)) {
+              if (kingMovePromotedList.some(km => km == move)) {
                 moves.push(new MovePiece(steps, promotedType, pos, move, prevMove, true));
               }
             }); 
           }else{
             // 移動後の位置が敵陣の場合も成れる
             pieceMoves.forEach(move => {
-              if (move.isEnemyField() && kingMovePromotedList.some(km => km.row === move.row && km.col === move.col)) {
+              if (isEnemyField(move) && kingMovePromotedList.some(km => km == move)) {
                 moves.push(new MovePiece(steps, promotedType, pos, move, prevMove, true));
               }
             }); 
@@ -1177,7 +1200,7 @@ export default function ShogiMatePage() {
         const kingMoveList = getPieceMoves(board, kingpos, pieceType, 'opponent');
         // 王手の範囲
         kingMoveList.forEach(move => {
-          if (board[move.row][move.col] === null){
+          if (board[move] === null){
             moves.push(new MovePiece(steps, pieceType, null, move, prevMove));
           }
         });
@@ -1192,25 +1215,25 @@ export default function ShogiMatePage() {
     const moves: MovePiece[] = [];
     const attackedPieces : PiecePosition[] = [];
     const longrangePieces: PiecePosition[] = [];
-    const kingpos = field.opponentking.position ?? new Coordinate(0, 0);
+    const kingpos = field.opponentking.position ?? 0;
     
     // 利きマスの一覧
-    const board = fieldToBoard(field);
+    const board = field.toBoard();
     const attackSquares = new Set<number>();
     field.selfpieces.forEach(pp => {
       if (pp.position) {
         const pieceMoves = getPieceMoves(board, pp.position, pp.piece, 'self', true);
         pieceMoves.forEach(move => {
-          attackSquares.add(move.hash());
+          attackSquares.add(move);
         });
 
         // 王を攻撃している駒を記録
-        if (pieceMoves.some(mv => mv.row === kingpos.row && mv.col === kingpos.col)) {
+        if (pieceMoves.some(mv => mv === kingpos)) {
           attackedPieces.push(pp);
           // 遠距離ユニットの場合は別に記録
           if (pp.piece && LONG_RANGE_PIECES.includes(pp.piece)) {
             // 王に隣接していない
-            if (Math.abs(pp.position.row - kingpos.row) > 1 || Math.abs(pp.position.col - kingpos.col) > 1){
+            if (!areAdjacent(kingpos, pp.position)) {
               longrangePieces.push(pp);
             }
           }
@@ -1222,43 +1245,46 @@ export default function ShogiMatePage() {
     const kingMoves = getPieceMoves(board, kingpos, '玉', 'opponent' );
     kingMoves.forEach(move => {
       // 自分の駒の利きがないマスにのみ逃げられる
-      if (!attackSquares.has(move.hash())) {
+      if (!attackSquares.has(move)) {
         moves.push(new MovePiece(steps, '玉', kingpos, move, prevMove));
       }
     });
 
     // 攻撃している駒を取る
     if (attackedPieces.length == 1) {
-      const targetPos = attackedPieces[0].position ?? new Coordinate(0, 0);
+      const targetPos = attackedPieces[0].position;
       field.opponentpieces.forEach(pp => {
         //王は逃げる手で考慮済みなので除外
         if (pp.piece === '玉') return;
 
         // 自分の駒で攻撃している駒を取れるか？
         const pieceMove = getPieceMoves(board, pp.position!, pp.piece, 'opponent' );
-        if (pieceMove.some(mv => mv.row === targetPos.row && mv.col === targetPos.col)) {
-          moves.push(new MovePiece(steps, pp.piece, pp.position, targetPos, prevMove));
+        if (pieceMove.some(mv => mv === targetPos)) {
+          moves.push(new MovePiece(steps, pp.piece, pp.position, targetPos ?? 0, prevMove));
         }
       });
     }
 
     // 合駒を打つ
+    const [kingrow, kingcol] = FromHash(kingpos);
     if (attackedPieces.length == 1 && longrangePieces.length == 1) {
       const attackedPos = longrangePieces[0].position;
       // 王と攻撃されている駒の間のマスに歩を打つ
-      const xstep = Math.sign(attackedPos!.col - kingpos.col);
-      const ystep = Math.sign(attackedPos!.row - kingpos.row);
 
+      const [atrow, atcol] = FromHash(attackedPos!);
+
+      const xstep = Math.sign(atcol - kingcol);
+      const ystep = Math.sign(atrow - kingrow);
       for(let i = 1; i < 9; i++) {
-        const betweenRow = kingpos.row + ystep * i;
-        const betweenCol = kingpos.col + xstep * i;
-        if (betweenRow === attackedPos!.row && betweenCol === attackedPos!.col) {
+        const betweenRow = kingrow + ystep * i;
+        const betweenCol = kingcol + xstep * i;
+        if (betweenRow === atrow && betweenCol === atcol) {
           break;
         }
         if (betweenRow < 0 || betweenRow >= 9 || betweenCol < 0 || betweenCol >= 9) {
           break;
         }
-        moves.push(new MovePiece(steps, '歩', null, new Coordinate(betweenRow, betweenCol), prevMove));
+        moves.push(new MovePiece(steps, '歩', null, ToHash(betweenRow, betweenCol), prevMove));
       }
     }
 
@@ -1301,13 +1327,13 @@ export default function ShogiMatePage() {
     }
     
     if (currentPath.length === 0) {
-      return initialField.toBoard();
+      return fieldToBoard(initialField);
     }
     
     // currentPathの最後の手まで適用
     const lastMove = currentPath[currentPath.length - 1];
     const field = Field.advanceBaseField(initialField, lastMove);
-    return field.toBoard();
+    return fieldToBoard(field);
   };
 
   // 表示用の持ち駒を取得
@@ -1372,26 +1398,26 @@ export default function ShogiMatePage() {
       
       // 移動先が選択されている場合、さらに絞り込み
       if (selectedDestination) {
+        const hash = selectedDestination.hash();
         filteredMoves = dropMoves.filter(move =>
-          move.to.row === selectedDestination.row &&
-          move.to.col === selectedDestination.col
+          move.to === hash
         );
       } else {
         filteredMoves = dropMoves;
       }
     } else {
       // 盤上の駒が選択されている場合（Coordinateの場合）
+      const hash = selectedPieceInView.hash();
       const pieceMoves = allMoves.filter(move => 
         move.from && 
-        move.from.row === selectedPieceInView.row && 
-        move.from.col === selectedPieceInView.col
+        move.from === hash
       );
       
       // 移動先が選択されている場合、さらに絞り込み（成りと不成の両方を表示）
       if (selectedDestination) {
+        const hash = selectedDestination.hash();
         filteredMoves = pieceMoves.filter(move =>
-          move.to.row === selectedDestination.row &&
-          move.to.col === selectedDestination.col
+          move.to === hash
         );
       } else {
         filteredMoves = pieceMoves;
@@ -1537,7 +1563,8 @@ export default function ShogiMatePage() {
                     // 直前に動かした駒の位置をチェック
                     if (currentPath.length > 0) {
                       const lastMove = currentPath[currentPath.length - 1];
-                      isLastMovedPiece = lastMove.to.row === rowIndex && lastMove.to.col === colIndex;
+                      const [lastMoveRow, lastMoveCol] = FromHash(lastMove.to);
+                      isLastMovedPiece = lastMoveRow === rowIndex && lastMoveCol === colIndex;
                       isLastMoveDropped = lastMove.IsDrop();
                     }
                     
@@ -1547,14 +1574,15 @@ export default function ShogiMatePage() {
                       selectedPieceInView.row === rowIndex && 
                       selectedPieceInView.col === colIndex;
                     
+                     const indexHash = ToHash(rowIndex, colIndex);
                     if (selectedPieceInView) {
                       // 駒を選択済み：フィルタリングされた移動先を表示
-                      candidateMove = filteredMoves.find(m => m.to.row === rowIndex && m.to.col === colIndex) || null;
+                      candidateMove = filteredMoves.find(m => m.to === indexHash) || null;
                     } else {
                       // 駒未選択：移動可能な駒を判定
                       const allMoves = getCurrentMoves();
                       isPieceSelectable = piece !== null && allMoves.some(m => 
-                        m.from && m.from.row === rowIndex && m.from.col === colIndex
+                        m.from && m.from === ToHash(rowIndex, colIndex)
                       );
                     }
                   }
@@ -1580,20 +1608,18 @@ export default function ShogiMatePage() {
                           handleCellClick(rowIndex, colIndex);
                         } else if (candidateMove) {
                           // 移動先を選択
-                          const destination = new Coordinate(rowIndex, colIndex);
+                          const destination = ToHash(rowIndex, colIndex);
                           
                           // この移動先への候補が何個あるかチェック
                           const currentMoves = selectedPieceInView ? 
                             getCurrentMoves().filter(m => {
                               if (typeof selectedPieceInView === 'string') {
                                 return m.IsDrop() && m.piece === selectedPieceInView &&
-                                  m.to.row === destination.row && m.to.col === destination.col;
+                                  m.to === destination;
                               } else {
-                                return m.from && 
-                                  m.from.row === selectedPieceInView.row && 
-                                  m.from.col === selectedPieceInView.col &&
-                                  m.to.row === destination.row && 
-                                  m.to.col === destination.col;
+                                const selectHash = ToHash(selectedPieceInView.row, selectedPieceInView.col);
+
+                                return m.from && m.from === selectHash && m.to === destination;
                               }
                             }) : [];
                           
@@ -1602,7 +1628,7 @@ export default function ShogiMatePage() {
                             handleSelectMove(currentMoves[0]);
                           } else if (currentMoves.length > 1) {
                             // 候補が複数ある場合（成りと不成）、移動先を選択状態にする
-                            setSelectedDestination(destination);
+                            setSelectedDestination(new Coordinate(rowIndex, colIndex));
                           }
                         } else if (isPieceSelectable) {
                           // 駒を選択
@@ -1619,18 +1645,13 @@ export default function ShogiMatePage() {
                       {renderPiece(piece)}
                       {candidateMove && (() => {
                         // この移動先への候補を取得
-                        const destination = new Coordinate(rowIndex, colIndex);
+                        const destination = ToHash(rowIndex, colIndex);
                         const movesToThisSquare = selectedPieceInView ? 
                           getCurrentMoves().filter(m => {
                             if (typeof selectedPieceInView === 'string') {
-                              return m.IsDrop() && m.piece === selectedPieceInView &&
-                                m.to.row === destination.row && m.to.col === destination.col;
+                              return m.IsDrop() && m.piece === selectedCapturedIndex && m.to === destination;
                             } else {
-                              return m.from && 
-                                m.from.row === selectedPieceInView.row && 
-                                m.from.col === selectedPieceInView.col &&
-                                m.to.row === destination.row && 
-                                m.to.col === destination.col;
+                              return m.from && m.from === selectedCapturedIndex && m.to === destination;
                             }
                           }) : [];
                         
