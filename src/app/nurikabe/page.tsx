@@ -979,6 +979,76 @@ class Field {
     return result;
   }
 
+  // 壁の連結性を保つために必要な壁を確定する処理
+  confirmWallsToKeepConnectivity(): boolean {
+    const wallHashes = new Set<number>();
+
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        if (this.cells[y][x].type === 'wall') {
+          wallHashes.add(new Position(x, y).toHash());
+        }
+      }
+    }
+
+    if (wallHashes.size <= 1) return false;
+
+    // 現状で壁が連結可能でない場合は、このルールでは確定しない
+    if (!this.isWallHashesConnected(wallHashes)) return false;
+
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        const cell = this.cells[y][x];
+        if (cell.type !== 'undecided') continue;
+
+        const hash = new Position(x, y).toHash();
+        if (!this.isWallHashesConnected(wallHashes, hash)) {
+          if (this.addWall(x, y, "壁の連結維持のため確定")) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  // 壁ハッシュが候補セル（壁 or 未確定）で連結しているかチェック
+  isWallHashesConnected(wallHashes: Set<number>, excludeHash?: number): boolean {
+    if (wallHashes.size <= 1) return true;
+
+    const start = wallHashes.values().next().value as number | undefined;
+    if (start === undefined) return true;
+
+    const visited = new Set<number>();
+    const queue: number[] = [start];
+    visited.add(start);
+
+    for (let i = 0; i < queue.length; i++) {
+      const currentHash = queue[i];
+      const pos = Position.fromHash(currentHash);
+      const adjacents = this.getAdjacentPositions(pos.x, pos.y);
+
+      for (const adjPos of adjacents) {
+        const adjHash = adjPos.toHash();
+        if (excludeHash !== undefined && adjHash === excludeHash) continue;
+        if (visited.has(adjHash)) continue;
+
+        const adjCell = this.cells[adjPos.y][adjPos.x];
+        if (adjCell.type === 'wall' || adjCell.type === 'undecided') {
+          visited.add(adjHash);
+          queue.push(adjHash);
+        }
+      }
+    }
+
+    for (const hash of wallHashes) {
+      if (!visited.has(hash)) return false;
+    }
+
+    return true;
+  }
+
   // 解析処理のメイン
   analyze(): boolean {
     this.remainingWalls = this.width * this.height - this.islands.reduce((sum, island) => sum + island.roomSize, 0);
@@ -1020,6 +1090,11 @@ class Field {
 
     // オーナーから到達可能な仮オーナー部屋を確定する処理
     if (this.processDetachedPreislands()) {
+      return true;
+    }
+
+    // この未確定マスが壁でないと、別の壁に繋がらない処理
+    if (this.confirmWallsToKeepConnectivity()) {
       return true;
     }
 
