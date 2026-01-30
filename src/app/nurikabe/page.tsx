@@ -1812,7 +1812,8 @@ export default function NurikabePage() {
                     
                     if (isHighlighted) {
                       if (fieldCell.type === 'wall') {
-                        bgColor = "bg-red-400";
+                        const isEdgeWall = fieldCell.wallGroup?.edgecells.has(hash) ?? false;
+                        bgColor = isEdgeWall ? "bg-red-700" : "bg-red-400";
                       } else if (fieldCell.type === 'undecided' && manualWalls.has(hash)) {
                         // 手動壁がハイライトされている場合は暗い灰色
                         bgColor = "bg-gray-700";
