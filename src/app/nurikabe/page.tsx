@@ -300,7 +300,7 @@ class Field {
     // 離れ小島のすべてのセルを島に追加
     for (const h of detachedIsland.confirmedCells.cells) {
       // 仮オーナーが島に結合される場合は理由は入れない(仮オーナーの理由を引き継ぐ)
-      this.confirmCellForIsland(h, targetIsland);
+      this.confirmCellForIsland(h, targetIsland, "離れ小島の確定による結合");
     }
     // 離れ小島リストから削除
     this.detachedIslands = this.detachedIslands.filter(di => di !== detachedIsland);
@@ -506,6 +506,31 @@ class Field {
 
       // 確定マスと部屋サイズが同じ場合、固定する
       if (island.confirmedCells.size() === island.roomSize) {
+        // 部屋を囲む壁を確定
+        if (this.fixIslandAndSurroundWithWalls(island)) {
+          changed = true;
+        }
+        continue;
+      }
+
+      //離れ小島と到達可能セルを含めたサイズが部屋サイズと同じ場合、確定マスに追加
+      const totalcell : Set<number> = new Set<number>();
+      island.reachableCells.getAllCells().forEach(hash => totalcell.add(hash));
+      for (const di of island.detachedConfirmedCells) {
+        di.confirmedCells.cells.forEach(hash => totalcell.add(hash));
+      }
+      if (totalcell.size === island.roomSize) {
+        // 離れ小島を確定マスに変更
+        for (const di of island.detachedConfirmedCells) {
+          for (const hash of di.confirmedCells.cells) {
+            this.confirmCellForIsland(hash, island, "離れ小島が部屋サイズに達したため確定");
+          }
+        }
+        island.detachedConfirmedCells = [];
+
+        for (const hash of island.reachableCells.getCellsExcludingConfirmed()) {
+          this.confirmCellForIsland(hash, island, "到達可能セル数と部屋サイズが同じのため確定");
+        }
         // 部屋を囲む壁を確定
         if (this.fixIslandAndSurroundWithWalls(island)) {
           changed = true;
