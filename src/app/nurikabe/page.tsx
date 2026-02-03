@@ -981,7 +981,6 @@ class Field {
       if (islands.length === 1){
         const island = islands[0];
         // 候補が1つだけなら、その島に確定
-        console.log(`離れ小島確定: 離れ小島${formatPosition(detachedIsland.x, detachedIsland.y)}が島${formatPosition(island.x, island.y)}に確定`);
         island.detachedConfirmedCells.push(detachedIsland);
         detachedIsland.detachedConfirmedCells = islands;
         result = true;
@@ -1264,6 +1263,14 @@ export default function NurikabePage() {
   const [showImport, setShowImport] = useState(false);
   const [exportText, setExportText] = useState("");
   const [importText, setImportText] = useState("");
+  const [inputCell, setInputCell] = useState<{x: number, y: number} | null>(null);
+  const [inputCellValue, setInputCellValue] = useState("");
+  const [notice, setNotice] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null);
+
+  const showNotice = (message: string, type: 'info' | 'success' | 'error' = 'info') => {
+    setNotice({ message, type });
+    setTimeout(() => setNotice(null), 3000);
+  };
 
   // エクスポート処理
   const handleExport = () => {
@@ -1283,7 +1290,7 @@ export default function NurikabePage() {
   // エクスポートテキストをコピー
   const handleCopyExport = () => {
     navigator.clipboard.writeText(exportText);
-    alert("コピーしました！");
+    showNotice("コピーしました！", "success");
   };
 
   // インポート処理
@@ -1297,14 +1304,14 @@ export default function NurikabePage() {
     try {
       const lines = importText.trim().split('\n');
       if (lines.length === 0) {
-        alert("テキストが空です");
+        showNotice("テキストが空です", "error");
         return;
       }
 
       // 1行目: width, height
       const [w, h] = lines[0].split(',').map(s => parseInt(s.trim()));
       if (isNaN(w) || isNaN(h) || w < 3 || w > 20 || h < 3 || h > 20) {
-        alert("盤面サイズが不正です (3-20の範囲)");
+        showNotice("盤面サイズが不正です (3-20の範囲)", "error");
         return;
       }
 
@@ -1318,15 +1325,15 @@ export default function NurikabePage() {
 
         const [x, y, num] = line.split(/\s+/).map(s => parseInt(s));
         if (isNaN(x) || isNaN(y) || isNaN(num)) {
-          alert(`${i + 1}行目が不正です: ${line}`);
+          showNotice(`${i + 1}行目が不正です: ${line}`, "error");
           return;
         }
         if (x < 1 || x > w || y < 1 || y > h) {
-          alert(`${i + 1}行目の座標が範囲外です: (${x}, ${y})`);
+          showNotice(`${i + 1}行目の座標が範囲外です: (${x}, ${y})`, "error");
           return;
         }
         if (num < 1 || num > 99) {
-          alert(`${i + 1}行目の数字が不正です: ${num} (1-99の範囲)`);
+          showNotice(`${i + 1}行目の数字が不正です: ${num} (1-99の範囲)`, "error");
           return;
         }
 
@@ -1338,9 +1345,9 @@ export default function NurikabePage() {
       setHeight(h);
       setBoard(newBoard);
       setShowImport(false);
-      alert("インポートしました！");
+      showNotice("インポートしました！", "success");
     } catch {
-      alert("インポートに失敗しました。形式を確認してください。");
+      showNotice("インポートに失敗しました。形式を確認してください。", "error");
     }
   };
 
@@ -1374,6 +1381,8 @@ export default function NurikabePage() {
     setHighlightedCells(new Set<number>());
     setSelectedCellDistances(new Map());
     setSelectedCell(null);
+    setInputCell(null);
+    setInputCellValue("");
   };
 
   // セルクリック時の処理
@@ -1452,30 +1461,41 @@ export default function NurikabePage() {
       setHighlightedCells(highlighted);
       setSelectedCellDistances(distances);
     } else {
-      // 入力モード：数字入力
-      const input = prompt("数字を入力してください (1-99、空白の場合は0またはキャンセル):");
-      
-      if (input === null) return; // キャンセル
-      
-      const value = input.trim();
-      let cellValue: CellValue = null;
-      
-      if (value === "" || value === "0") {
-        cellValue = null;
-      } else {
-        const num = parseInt(value);
-        if (!isNaN(num) && num >= 1 && num <= 99) {
-          cellValue = num;
-        } else {
-          alert("1-99の数字を入力してください");
-          return;
-        }
-      }
-      
-      const newBoard = [...board];
-      newBoard[row][col] = cellValue;
-      setBoard(newBoard);
+      // 入力モード：インライン入力
+      const currentValue = board[row][col];
+      setInputCell({ x: col, y: row });
+      setInputCellValue(currentValue !== null ? currentValue.toString() : "");
     }
+  };
+
+  const handleApplyCellInput = () => {
+    if (!inputCell) return;
+
+    const value = inputCellValue.trim();
+    let cellValue: CellValue = null;
+
+    if (value === "" || value === "0") {
+      cellValue = null;
+    } else {
+      const num = parseInt(value);
+      if (!isNaN(num) && num >= 1 && num <= 99) {
+        cellValue = num;
+      } else {
+        showNotice("1-99の数字を入力してください", "error");
+        return;
+      }
+    }
+
+    const newBoard = [...board];
+    newBoard[inputCell.y][inputCell.x] = cellValue;
+    setBoard(newBoard);
+    setInputCell(null);
+    setInputCellValue("");
+  };
+
+  const handleCancelCellInput = () => {
+    setInputCell(null);
+    setInputCellValue("");
   };
 
 
@@ -1643,6 +1663,8 @@ export default function NurikabePage() {
     setSelectedCellDistances(new Map());
     setManualWalls(new Set());
     setManualEmptyCells(new Set());
+    setInputCell(null);
+    setInputCellValue("");
   };
 
   // １つ前に戻る
@@ -1696,6 +1718,20 @@ export default function NurikabePage() {
         >使い方</button>
         <Link href="/" className="inline-block px-4 py-2 bg-gray-100 rounded hover:bg-gray-200">トップに戻る</Link>
       </div>
+
+      {notice && (
+        <div
+          className={`mb-4 p-3 rounded border text-sm ${
+            notice.type === 'success'
+              ? 'bg-green-100 border-green-400 text-green-800'
+              : notice.type === 'error'
+                ? 'bg-red-100 border-red-400 text-red-800'
+                : 'bg-blue-100 border-blue-400 text-blue-800'
+          }`}
+        >
+          {notice.message}
+        </div>
+      )}
 
       {showManual && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
@@ -1865,6 +1901,30 @@ export default function NurikabePage() {
           </>
         )}
       </div>
+
+      {!isAnalyzeMode && inputCell && (
+        <div className="mb-4 p-3 border rounded bg-gray-50">
+          <p className="text-sm mb-2">セル {formatPosition(inputCell.x, inputCell.y)} に数字を入力 (1-99、空欄/0で空白)</p>
+          <div className="flex gap-2 items-center">
+            <input
+              type="number"
+              min="0"
+              max="99"
+              value={inputCellValue}
+              onChange={e => setInputCellValue(e.target.value)}
+              className="w-24 p-1 border rounded"
+            />
+            <button
+              className="px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+              onClick={handleApplyCellInput}
+            >適用</button>
+            <button
+              className="px-3 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+              onClick={handleCancelCellInput}
+            >キャンセル</button>
+          </div>
+        </div>
+      )}
 
       {/* 完成メッセージ */}
       {isAnalyzeMode && isCompleted && (
