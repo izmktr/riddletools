@@ -192,6 +192,7 @@ class CellGroup{
 }
 
 class Island {
+  hash : number; // オーナーセルのハッシュ値
   x: number;
   y: number;
   roomSize: number;  // 部屋サイズ（数字）
@@ -202,6 +203,7 @@ class Island {
   isFixed: boolean;  // 確定マスと部屋サイズが同じになったら固定
 
   constructor(field: Field, x: number, y: number, roomSize: number) {
+    this.hash = new Position(x, y).toHash();
     this.x = x;
     this.y = y;
     this.roomSize = roomSize;
@@ -721,6 +723,16 @@ class Field {
       // 距離ごとの候補セル数をカウント
       const maxDistance = island.reachableCells.getMaxDistance();
 
+      // 距離1が1マスだけならそれは確定マス
+      const distance1Cells = island.reachableCells.getCellsAtDistance(1);
+      if (distance1Cells.size === 1) {
+        const onlyHash = Array.from(distance1Cells)[0];
+        const pos = Position.fromHash(onlyHash);
+        this.addConfirmedCell(pos.x, pos.y, "距離1が1マスだけのため確定");
+        changed = true;
+        continue;
+      }
+
       // n=1からトータル部屋数まで繰り返す
       for (let n = 1; n <= maxDistance; n++) {
         // 距離1～nの部屋候補の数を求める
@@ -755,8 +767,8 @@ class Field {
               if (this.addConfirmedCell(pos.x, pos.y, `壁仮定により確定（距離${n}、離れ小島）`)) {
                 // 追加した離れ小島と島を関連付け
                 const cell = this.cells[pos.y][pos.x];
-                if (cell.type === 'preowner' && cell.ownerIsland) {
-                  const detachedIsland = cell.ownerIsland;
+                const detachedIsland = cell.ownerIsland;
+                if (cell.type === 'preowner' && detachedIsland && !island.detachedConfirmedCells.includes(detachedIsland)) {
                   detachedIsland.detachedConfirmedCells = [island];
                   island.detachedConfirmedCells.push(detachedIsland);
                 }
@@ -969,6 +981,7 @@ class Field {
       if (islands.length === 1){
         const island = islands[0];
         // 候補が1つだけなら、その島に確定
+        console.log(`離れ小島確定: 離れ小島${formatPosition(detachedIsland.x, detachedIsland.y)}が島${formatPosition(island.x, island.y)}に確定`);
         island.detachedConfirmedCells.push(detachedIsland);
         detachedIsland.detachedConfirmedCells = islands;
         result = true;
