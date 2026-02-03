@@ -428,7 +428,7 @@ class Field {
     cell.type = 'confirmed';
     cell.confirmedOwners = [island];
     cell.ownerIsland = island;
-    if (reason) cell.reason = reason;
+    if (reason && cell.reason === "") cell.reason = reason;
   }
 
   preownerCellForIsland(hash: number, island: Island, reason?: string): void {
@@ -438,7 +438,7 @@ class Field {
     cell.type = 'preowner';
     cell.confirmedOwners = [island];
     cell.ownerIsland = island;
-    if (reason) cell.reason = reason;
+    if (reason && cell.reason === "") cell.reason = reason;
   }
 
   // 到達可能な未確定セルを収集
