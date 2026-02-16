@@ -748,7 +748,7 @@ export default function ShogiMatePage() {
       const board: (Piece | null)[] = Array(81).fill(null);
       
       // 相手の玉を配置
-      if (this.opponentking.position) {
+      if (this.opponentking.position !== null) {
         board[this.opponentking.position] = {
           type: this.opponentking.piece,
           side: 'opponent'
@@ -757,7 +757,7 @@ export default function ShogiMatePage() {
       
       // 相手の駒を配置
       for (const pp of this.opponentpieces) {
-        if (pp.position) {
+        if (pp.position !== null) {
           board[pp.position] = {
             type: pp.piece,
             side: 'opponent'
@@ -767,7 +767,7 @@ export default function ShogiMatePage() {
       
       // 自分の駒を配置
       for (const pp of this.selfpieces) {
-        if (pp.position) {
+        if (pp.position !== null) {
           board[pp.position] = {
             type: pp.piece,
             side: 'self'
@@ -832,7 +832,8 @@ export default function ShogiMatePage() {
     nextField: Field, 
     move: MovePiece
   ): MovePiece | null {
-    const fieldHash = hashField(nextField, move.IsSelfStep() ? 's' : 'o');
+    // nextField is after applying move, so the side to move flips
+    const fieldHash = hashField(nextField, move.IsSelfStep() ? 'o' : 's');
     
     // 既に探索済みの盤面があるか確認
     if (visitedFields.has(fieldHash)) {
@@ -980,7 +981,8 @@ export default function ShogiMatePage() {
       const firstMove = checkOrRegisterField(visitedFields, nextField, move);
       if (firstMove && 0 <= priority){
         if (firstMove.isSuccess()) {
-          const result = setSuccess(move, firstMove.successMove!);
+          const successTarget = (firstMove.successMove === firstMove) ? move : firstMove.successMove!;
+          const result = setSuccess(move, successTarget);
           if (result){
             computedMove = move;
             break;
@@ -1156,7 +1158,7 @@ export default function ShogiMatePage() {
     field.selfpieces.forEach(pp => {
       // 自分の駒の移動範囲を取得
       const pos = pp.position;
-      if (pos && pp.piece) {
+      if (pos !== null && pp.piece) {
         // 自分の駒の移動範囲を取得
         const pieceMoves = getPieceMoves(board, pos, pp.piece, 'self');
         // 王手の範囲を取得
@@ -1221,7 +1223,7 @@ export default function ShogiMatePage() {
     const board = field.toBoard();
     const attackSquares = new Set<number>();
     field.selfpieces.forEach(pp => {
-      if (pp.position) {
+      if (pp.position !== null) {
         const pieceMoves = getPieceMoves(board, pp.position, pp.piece, 'self', true);
         pieceMoves.forEach(move => {
           attackSquares.add(move);
@@ -1233,7 +1235,7 @@ export default function ShogiMatePage() {
           // 遠距離ユニットの場合は別に記録
           if (pp.piece && LONG_RANGE_PIECES.includes(pp.piece)) {
             // 王に隣接していない
-            if (!areAdjacent(kingpos, pp.position)) {
+            if (pp.position !== null && !areAdjacent(kingpos, pp.position)) {
               longrangePieces.push(pp);
             }
           }
@@ -1315,7 +1317,7 @@ export default function ShogiMatePage() {
 
     if (move.from === null) {
       return `${move.step + 1}手: ${formatPositionFromHash(move.to)}${move.piece}打` + str;
-    } else if (move.from) {
+    } else if (move.from !== null) {
       if (move.change) {
         const actualPiece = UNPROMOTED_MAP[move.piece as string];
         return `${move.step + 1}手: ${formatPositionFromHash(move.to)}${actualPiece}成 [${formatPositionFromHash(move.from)}]` + str;
