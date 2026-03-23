@@ -608,6 +608,18 @@ export default function SkeletonPage() {
     return lengthMap;
   }
 
+  const hasSameWordIntersectionConflict = (targetSlot: Slot, word: string, intersections: Intersection[]): boolean => {
+    return intersections.some((intersection) => {
+      if (intersection.horizontalSlots === targetSlot) {
+        return intersection.verticalSlots.confirmedWord === word;
+      }
+      if (intersection.verticalSlots === targetSlot) {
+        return intersection.horizontalSlots.confirmedWord === word;
+      }
+      return false;
+    });
+  };
+
 
   // 各スロットに確定した文字を探して入れていく
   const solveConstraints = (lengthMap: Map<number, string[]>, slots: Slot[], intersections: Intersection[]):
@@ -628,17 +640,23 @@ export default function SkeletonPage() {
     // 確定できる単語を順次配置していく（無限ループ）
     while (true) {
       const trashSlots : Slot[] = [];
+      let hasNewConfirmed = false;
       
       // 候補が1個しかないスロットを確定
       slots.forEach(slot => {
         if (slot.confirmedWord == null && slot.candidates.length === 1) {
+          const candidate = slot.candidates[0];
+          if (hasSameWordIntersectionConflict(slot, candidate, intersections)) {
+            return;
+          }
           if (trashSlots.includes(slot)) return;
-          slot.confirmedWord = slot.candidates[0];
+          slot.confirmedWord = candidate;
           trashSlots.push(slot);
+          hasNewConfirmed = true;
         }
       });
 
-      if (trashSlots.length === 0) {
+      if (!hasNewConfirmed) {
         break; // これ以上確定できる単語がない
       }
 
