@@ -1951,6 +1951,7 @@ export default function NurikabePage() {
                   let bgColor = "bg-white hover:bg-gray-100";
                   let textContent: string | number = cell !== null ? cell : "";
                   const hash = new Position(colIndex, rowIndex).toHash();
+                  const isInputCell = !isAnalyzeMode && inputCell?.x === colIndex && inputCell?.y === rowIndex;
                   
                   if (isAnalyzeMode && field) {
                     const fieldCell = field.cells[rowIndex][colIndex];
@@ -2001,6 +2002,8 @@ export default function NurikabePage() {
                         textContent = "";
                       }
                     }
+                  } else if (isInputCell) {
+                    bgColor = "bg-sky-200 hover:bg-sky-300";
                   }
                   
                   const distance = selectedCellDistances.get(hash);
