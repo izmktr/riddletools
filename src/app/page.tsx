@@ -18,6 +18,7 @@ export default function Home() {
     ["しりとりソルバー", "/shiritori"],
     ["スケルトンソルバー", "/skeleton"],
     ["覆面算ソルバー", "/cryptarithmetic"],
+    ["回文ソルバー", "/palindrome"],
     ["数独ソルバー", "/sudoku"],
     ["中国剰余定理", "/chinese-remainder"],
     ["ぬりかべソルバー(WIP)", "/nurikabe"],
