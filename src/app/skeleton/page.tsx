@@ -39,8 +39,8 @@ interface CompressedData {
   boardHeight?: number;
 }
 
-const DEFAULT_BOARD_WIDTH = 35;
-const DEFAULT_BOARD_HEIGHT = 35;
+const DEFAULT_BOARD_WIDTH = 24;
+const DEFAULT_BOARD_HEIGHT = 16;
 
 export default function SkeletonPage() {
   const [boardWidth, setBoardWidth] = useState(DEFAULT_BOARD_WIDTH);
