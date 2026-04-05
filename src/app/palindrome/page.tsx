@@ -33,6 +33,7 @@ type SolveResult = {
   }[];
   palindromeText: string;
   unknownWords: string[];
+  totalUnknownLength: number;
 };
 
 const MAX_UNKNOWN_LENGTH = 8;
@@ -60,21 +61,6 @@ function hasAdjacentUnknown(tokens: Token[]): boolean {
     }
   }
   return false;
-}
-
-function isFirstLessThanLast(tokens: Token[]): boolean {
-  const first = tokens[0];
-  const last = tokens[tokens.length - 1];
-
-  if (!first || !last) {
-    return false;
-  }
-
-  if (first.kind === "known" && last.kind === "known") {
-    return first.word.localeCompare(last.word, "ja") < 0;
-  }
-
-  return true;
 }
 
 function meetsUnknownEdgeRule(tokens: Token[], placeUnknownAtEnd: boolean): boolean {
@@ -117,6 +103,30 @@ function buildCharEntries(tokens: Token[], unknownLengths: number[]): CharEntry[
   return entries;
 }
 
+// 合計値 total を count 個の整数（各 1〜maxPart）に分割する全組み合わせを返す
+function generateCompositions(count: number, total: number, maxPart: number): number[][] {
+  const result: number[][] = [];
+  const current: number[] = [];
+
+  const recurse = (remaining: number, partsLeft: number) => {
+    if (partsLeft === 0) {
+      if (remaining === 0) {
+        result.push([...current]);
+      }
+      return;
+    }
+    const maxVal = Math.min(maxPart, remaining - (partsLeft - 1));
+    for (let v = 1; v <= maxVal; v += 1) {
+      current.push(v);
+      recurse(remaining - v, partsLeft - 1);
+      current.pop();
+    }
+  };
+
+  recurse(total, count);
+  return result;
+}
+
 function solveUnknownWords(tokens: Token[], unknownCount: number): string[][] {
   if (unknownCount === 0) {
     const joined = tokens
@@ -125,39 +135,26 @@ function solveUnknownWords(tokens: Token[], unknownCount: number): string[][] {
     return isPalindrome(joined) ? [[]] : [];
   }
 
-  const allCandidates: string[][] = [];
-  const lengths = new Array<number>(unknownCount).fill(1);
+  const dedup = new Map<string, string[]>();
 
-  const enumerateLengths = (index: number) => {
-    if (allCandidates.length >= MAX_SOLUTIONS) {
-      return;
-    }
-
-    if (index === unknownCount) {
+  // 合計長が小さい順に探索し、解が見つかった合計長より大きい合計長は探索しない
+  for (let targetSum = unknownCount; targetSum <= unknownCount * MAX_UNKNOWN_LENGTH; targetSum += 1) {
+    const tuples = generateCompositions(unknownCount, targetSum, MAX_UNKNOWN_LENGTH);
+    for (const lengths of tuples) {
       const solved = solveWithLengthPattern(tokens, lengths);
       if (solved) {
-        allCandidates.push(solved);
+        const key = solved.join("\u0001");
+        if (!dedup.has(key)) {
+          dedup.set(key, solved);
+        }
       }
-      return;
-    }
-
-    for (let length = 1; length <= MAX_UNKNOWN_LENGTH; length += 1) {
-      lengths[index] = length;
-      enumerateLengths(index + 1);
-
-      if (allCandidates.length >= MAX_SOLUTIONS) {
-        return;
+      if (dedup.size >= MAX_SOLUTIONS) {
+        break;
       }
     }
-  };
-
-  enumerateLengths(0);
-
-  const dedup = new Map<string, string[]>();
-  for (const words of allCandidates) {
-    const key = words.join("\u0001");
-    if (!dedup.has(key)) {
-      dedup.set(key, words);
+    // この合計長で解が見つかった場合、それより大きい合計長は探索しない
+    if (dedup.size > 0) {
+      break;
     }
   }
 
@@ -306,13 +303,31 @@ function enumerateSequences(words: string[], unknownCount: number, placeUnknownA
   };
 
   const pushResult = (tokens: Token[], unknownWords: string[]) => {
-    const displayWords = unknownWords.map((word) => {
+    // 複数の不明単語が同じ文字列の場合は除外（並び替えると重複結果になるため）
+    if (new Set(unknownWords).size < unknownWords.length) {
+      return;
+    }
+
+    const totalUnknownLength = unknownWords.reduce((sum, w) => sum + w.length, 0);
+
+    const displayWordMap = new Map<string, string>();
+    for (const word of unknownWords) {
       const reversed = reverseString(word);
-      if (word === reversed) {
-        return `${word}`;
+      const normalized = word.localeCompare(reversed, "ja") <= 0
+        ? `${word}\u0001${reversed}`
+        : `${reversed}\u0001${word}`;
+
+      if (!displayWordMap.has(normalized)) {
+        if (word === reversed) {
+          displayWordMap.set(normalized, word);
+        } else if (word.localeCompare(reversed, "ja") <= 0) {
+          displayWordMap.set(normalized, `${word} / ${reversed}`);
+        } else {
+          displayWordMap.set(normalized, `${reversed} / ${word}`);
+        }
       }
-      return `${word} / ${reversed}`;
-    });
+    }
+    const displayWords = Array.from(displayWordMap.values());
 
     const sequenceParts = tokens.map((token) => ({
       text: tokenText(token, unknownWords),
@@ -322,12 +337,13 @@ function enumerateSequences(words: string[], unknownCount: number, placeUnknownA
       .map((token) => tokenText(token, unknownWords))
       .join("");
 
-    const key = `${sequenceParts.map((part) => part.text).join("|")}\u0001${displayWords.join("\u0001")}`;
+    const key = displayWords.join("\u0001");
     if (!results.has(key)) {
       results.set(key, {
         sequenceParts,
         palindromeText,
         unknownWords: displayWords,
+        totalUnknownLength,
       });
     }
   };
@@ -345,10 +361,6 @@ function enumerateSequences(words: string[], unknownCount: number, placeUnknownA
       }
 
       if (hasAdjacentUnknown(tokens)) {
-        return;
-      }
-
-      if (!isFirstLessThanLast(tokens)) {
         return;
       }
 
@@ -462,7 +474,17 @@ export default function PalindromePage() {
       return;
     }
 
-    const solved = enumerateSequences(wordList, unknownCount, placeUnknownAtEnd);
+    const minUnknownCount = placeUnknownAtEnd ? 1 : 0;
+    let solved: SolveResult[] = [];
+
+    for (let currentUnknownCount = minUnknownCount; currentUnknownCount <= unknownCount; currentUnknownCount += 1) {
+      solved = enumerateSequences(wordList, currentUnknownCount, placeUnknownAtEnd);
+      if (solved.length > 0) {
+        break;
+      }
+    }
+
+    solved.sort((a, b) => a.totalUnknownLength - b.totalUnknownLength);
     setResults(solved);
 
     if (solved.length === 0) {
@@ -509,7 +531,7 @@ export default function PalindromePage() {
             <h2 className="text-xl font-bold mb-2">回文ソルバーの使い方</h2>
             <ul className="list-disc pl-5 space-y-2 text-sm">
               <li>単語を改行区切りで入力します。</li>
-              <li>不明単語数を指定します（初期値は1）。</li>
+              <li>不明単語数を指定します（初期値は1）。0個からその個数まで、少ない個数を優先して探索します。</li>
               <li>先頭の単語は常に既知単語です（不明単語にはなりません）。</li>
               <li>不明単語は1〜8文字のワイルドカードとして扱います。</li>
               <li>不明単語どうしが連続する並びは除外します。</li>
@@ -536,7 +558,7 @@ export default function PalindromePage() {
 
         <section className="space-y-3">
           <label className="block text-sm font-medium" htmlFor="unknownCount">
-            不明単語数
+            不明単語数の上限
           </label>
           <input
             id="unknownCount"
