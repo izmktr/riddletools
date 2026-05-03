@@ -13,6 +13,7 @@ export default function Home() {
     ["点字変換ツール", "/braille"],
     ["モールス信号変換ツール", "/morse"],
     ["魚の骨ツール", "/sakananohone"],
+    ["検索・辞書", "/dictionary"],
   ];
   const Solver = [
     ["しりとりソルバー", "/shiritori"],
