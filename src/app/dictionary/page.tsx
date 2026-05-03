@@ -68,6 +68,8 @@ function parseCSV(text: string): string[][] {
     );
 }
 
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+
 export default function DictionaryPage() {
   const [showHelp, setShowHelp] = useState(false);
   const [searchType, setSearchType] = useState<"partial" | "regex" | "anagram">("partial");
@@ -85,7 +87,7 @@ export default function DictionaryPage() {
 
   // dic/index.csv を読み込む
   useEffect(() => {
-    fetch("/dic/index.csv")
+    fetch(`${BASE_PATH}/dic/index.csv`)
       .then((res) => res.text())
       .then((text) => {
         const parsed = parseCSV(text);
@@ -103,7 +105,7 @@ export default function DictionaryPage() {
   useEffect(() => {
     if (!selectedDic) return;
     setLoadError(null);
-    fetch(`/dic/${selectedDic}`)
+    fetch(`${BASE_PATH}/dic/${selectedDic}`)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
         return res.text();
