@@ -25,22 +25,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
       
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
       
       - name: Setup Pages
         uses: actions/configure-pages@v5
+        id: pages
         with:
           # 自動的にベースパスを設定
           static_site_generator: next
       
       - name: Restore cache
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.3
         with:
           path: |
             .next/cache
@@ -57,7 +58,7 @@ jobs:
           BASE_PATH: /riddletools
       
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v3.0.1
         with:
           path: ./out
 
