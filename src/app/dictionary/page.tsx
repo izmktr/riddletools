@@ -68,6 +68,26 @@ function parseCSV(text: string): string[][] {
     );
 }
 
+async function fetchCsvText(url: string, label: string): Promise<string> {
+  const res = await fetch(url);
+  const text = await res.text();
+
+  if (!res.ok) {
+    const bodyPreview = text.trim().slice(0, 200);
+    throw new Error(
+      [
+        `${label} の読み込みに失敗しました`,
+        `URL: ${url}`,
+        `HTTP: ${res.status} ${res.statusText}`,
+        `Content-Type: ${res.headers.get("content-type") ?? "unknown"}`,
+        bodyPreview ? `Response: ${bodyPreview}` : "Response: (empty)",
+      ].join("\n")
+    );
+  }
+
+  return text;
+}
+
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 
 export default function DictionaryPage() {
@@ -87,17 +107,42 @@ export default function DictionaryPage() {
 
   // dic/index.csv を読み込む
   useEffect(() => {
-    fetch(`${BASE_PATH}/dic/index.csv`)
-      .then((res) => res.text())
+    const indexUrl = `${BASE_PATH}/dic/index.csv`;
+
+    fetchCsvText(indexUrl, "index.csv")
       .then((text) => {
         const parsed = parseCSV(text);
         const entries: DicEntry[] = parsed
           .filter((row) => row.length >= 2)
           .map((row) => ({ name: row[0], file: row[1] }));
+
+        if (entries.length === 0) {
+          setLoadError(
+            [
+              "index.csv は読み込めましたが、有効な辞書エントリが見つかりませんでした",
+              `URL: ${indexUrl}`,
+              `BASE_PATH: ${BASE_PATH || "(empty)"}`,
+              text.trim()
+                ? `先頭データ: ${text.trim().split(/\r?\n/).slice(0, 5).join(" | ")}`
+                : "先頭データ: (empty)",
+            ].join("\n")
+          );
+          setDicList([]);
+          return;
+        }
+
         setDicList(entries);
+        setLoadError(null);
       })
       .catch((e) => {
-        setLoadError(`index.csv の読み込みに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+        setLoadError(
+          [
+            e instanceof Error ? e.message : `index.csv の読み込みに失敗しました: ${String(e)}`,
+            `BASE_PATH: ${BASE_PATH || "(empty)"}`,
+            `location.pathname: ${typeof window !== "undefined" ? window.location.pathname : "(server)"}`,
+          ].join("\n")
+        );
+        setDicList([]);
       });
   }, []);
 
@@ -105,11 +150,7 @@ export default function DictionaryPage() {
   useEffect(() => {
     if (!selectedDic) return;
     setLoadError(null);
-    fetch(`${BASE_PATH}/dic/${selectedDic}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-        return res.text();
-      })
+    fetchCsvText(`${BASE_PATH}/dic/${selectedDic}`, `辞書ファイル ${selectedDic}`)
       .then((text) => {
         const parsed = parseCSV(text);
         if (parsed.length === 0) {
@@ -354,7 +395,7 @@ export default function DictionaryPage() {
 
       {/* エラー表示 */}
       {loadError && (
-        <div className="mb-4 px-4 py-2 bg-red-100 text-red-700 border border-red-300 rounded">
+        <div className="mb-4 px-4 py-2 bg-red-100 text-red-700 border border-red-300 rounded whitespace-pre-wrap break-words">
           {loadError}
         </div>
       )}
