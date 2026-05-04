@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 
 type DicEntry = { name: string; file: string };
@@ -91,6 +91,7 @@ async function fetchCsvText(url: string, label: string): Promise<string> {
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 
 export default function DictionaryPage() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [searchType, setSearchType] = useState<"partial" | "regex" | "anagram">("partial");
   const [searchText, setSearchText] = useState("");
@@ -276,6 +277,45 @@ export default function DictionaryPage() {
     });
   };
 
+  // ローカルCSVファイルを読み込む
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLoadError(null);
+    try {
+      const text = await file.text();
+      const parsed = parseCSV(text);
+      if (parsed.length === 0) {
+        setLoadError("ファイルが空です");
+        setHeaders([]);
+        setRows([]);
+        return;
+      }
+      const [header, ...dataRows] = parsed;
+      setHeaders(header);
+      setRows(dataRows);
+      setSelectedCols(new Array(header.length).fill(false));
+      setMatchedCells(new Set());
+      setHasSearched(false);
+      setResultExceeded(false);
+      setSearchText("");
+      setSelectedDic("");
+    } catch (err) {
+      setLoadError(
+        `ファイルの読み込みに失敗しました: ${err instanceof Error ? err.message : String(err)}`
+      );
+      setHeaders([]);
+      setRows([]);
+    }
+
+    // input をリセット（同じファイルを再度選択できるように）
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, []);
+
+
   return (
     <main className="min-h-screen p-6 max-w-5xl mx-auto">
       <div className="mb-4">
@@ -391,6 +431,20 @@ export default function DictionaryPage() {
             </option>
           ))}
         </select>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,.txt"
+          onChange={handleFileSelect}
+          className="hidden"
+          aria-label="CSVファイルを選択"
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="bg-gray-200 hover:bg-gray-300 px-4 py-1.5 rounded transition-colors text-sm font-semibold"
+        >
+          CSVを開く
+        </button>
       </div>
 
       {/* エラー表示 */}
