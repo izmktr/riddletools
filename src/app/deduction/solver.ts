@@ -437,6 +437,15 @@ export const parsePuzzle = (input: string): ParsedPuzzle => {
       const rightOperands = rightTokens.map((token) =>
         parseEqualityOperand(token, line, categories, categoryIndexByName, valueIndexByCategory, valueHits)
       );
+
+      if (rightOperands.length >= 2 && rightOperands.every((operand) => operand.kind === "ref")) {
+        const rightCategory = rightOperands[0].ref.categoryIndex;
+        const mixedCategory = rightOperands.some((operand) => operand.ref.categoryIndex !== rightCategory);
+        if (mixedCategory) {
+          throw new Error(`L${line}: 右辺リストの値は同一カテゴリで指定してください`);
+        }
+      }
+
       const hasProjectedOperand = leftOperand.kind === "projected" || rightOperands.some((operand) => operand.kind === "projected");
 
       if (!hasProjectedOperand) {
