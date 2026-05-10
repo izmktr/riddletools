@@ -16,9 +16,23 @@ const SAMPLE_INPUT = `名前[一郎,次郎,花子]
 次郎.順位<花子`;
 
 export default function DeductionPage() {
-  const [input, setInput] = useState(SAMPLE_INPUT);
+  const [showManual, setShowManual] = useState(false);
+  const [input, setInput] = useState("");
   const [result, setResult] = useState<SolveResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const formatErrorMessage = (message: string): string => {
+    const match = message.match(/^L(\d+):\s*(.*)$/);
+    if (!match) {
+      return `エラー: ${message}`;
+    }
+
+    const lineNumber = Number(match[1]);
+    const lineText = input.split(/\r?\n/)[lineNumber - 1] ?? "";
+    const detail = match[2] || "不明なエラーが発生しました";
+
+    return `${lineNumber}:${lineText}\nエラー: ${detail}`;
+  };
 
   const solutionCountText = useMemo(() => {
     if (!result) {
@@ -40,7 +54,7 @@ export default function DeductionPage() {
       setError(null);
     } catch (e) {
       const message = e instanceof Error ? e.message : "不明なエラーが発生しました";
-      setError(message);
+      setError(formatErrorMessage(message));
       setResult(null);
     }
   };
@@ -60,6 +74,45 @@ export default function DeductionPage() {
       </div>
 
       <h1 className="text-2xl font-bold">推理パズルソルバー</h1>
+      <div className="flex flex-wrap gap-2">
+        <button
+          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+          onClick={() => setShowManual(true)}
+        >
+          使い方
+        </button>
+        <button
+          className="px-4 py-2 bg-green-100 text-green-800 rounded hover:bg-green-200"
+          onClick={() => {
+            setInput(SAMPLE_INPUT);
+            setResult(null);
+            setError(null);
+          }}
+        >
+          サンプル
+        </button>
+      </div>
+
+      {showManual && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded shadow-lg p-6 max-w-2xl w-full relative">
+            <button
+              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
+              onClick={() => setShowManual(false)}
+            >
+              閉じる
+            </button>
+            <h2 className="text-xl font-bold mb-3">使い方</h2>
+            <ul className="list-disc pl-5 space-y-2 text-sm">
+              <li>カテゴリ定義を先に記述します（例: 名前[一郎,次郎,花子]）。</li>
+              <li>続けて条件定義を記述し、「解く」を押すと解の一覧を表示します。</li>
+              <li>等号、不等号、射影、右辺リスト、四則演算に対応しています。</li>
+              <li>解析エラーがある場合は「行番号:行内容」と「エラー:詳細」を表示します。</li>
+              <li>「サンプル」で入力例を復元、「クリア」で入力と結果を消去できます。</li>
+            </ul>
+          </div>
+        </div>
+      )}
 
       <p className="text-sm text-gray-700">
         仕様どおりの定義文を入力して、条件を満たすすべての解を探索します。
@@ -85,22 +138,12 @@ export default function DeductionPage() {
           onClick={handleClear}
         >
           クリア
-        </button>
-        <button
-          className="px-4 py-2 bg-green-100 text-green-800 rounded hover:bg-green-200"
-          onClick={() => {
-            setInput(SAMPLE_INPUT);
-            setResult(null);
-            setError(null);
-          }}
-        >
-          サンプル
-        </button>
+        </button>
       </div>
 
       {error && (
-        <div className="border border-red-300 bg-red-50 text-red-800 rounded p-3">
-          エラー: {error}
+        <div className="border border-red-300 bg-red-50 text-red-800 rounded p-3 whitespace-pre-wrap">
+          {error}
         </div>
       )}
 

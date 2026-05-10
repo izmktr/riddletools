@@ -93,7 +93,7 @@ interface RawConditionLine {
 
 const IDENTIFIER_FORBIDDEN_PATTERN = /[.,\[\]\s]/;
 
-const normalizeLine = (line: string): string => line.replace(/[ \t]/g, "").trim();
+const normalizeLine = (line: string): string => line.replace(/#.*$/, "").replace(/[ \t]/g, "").trim();
 
 const toComparableNumber = (value: string, index: number): number => {
   const numeric = Number(value);

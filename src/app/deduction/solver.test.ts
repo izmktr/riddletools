@@ -67,6 +67,21 @@ describe("deduction solver", () => {
     }
   });
 
+  test("#以降はコメントとして無視する", () => {
+    const input = [
+      "名前[一郎,次郎] # 名前カテゴリ",
+      "食べ物[カツ丼,カレー]",
+      "一郎=カツ丼 # 対応づけ",
+      "次郎=カレー",
+    ].join("\n");
+
+    const result = solvePuzzle(input);
+    expect(result.solutions).toHaveLength(1);
+    expect(result.solutions[0]).toEqual([
+      ["一郎", "カツ丼"],
+      ["次郎", "カレー"],
+    ]);
+  });
   test("カテゴリ省略が曖昧なときはエラー", () => {
     const input = [
       "A[a,b]",
