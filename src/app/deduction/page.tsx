@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { solvePuzzle, type SolveResult } from "./solver";
+import { solvePuzzle, type SolveResult } from "@/app/deduction/solver";
 
 const SAMPLE_INPUT = `名前[一郎,次郎,花子]
 食べ物[カツ丼,ハンバーグ,カレー]
@@ -138,7 +138,8 @@ export default function DeductionPage() {
           onClick={handleClear}
         >
           クリア
-        </button>
+        </button>
+
       </div>
 
       {error && (

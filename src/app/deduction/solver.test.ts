@@ -1,4 +1,4 @@
-import { parsePuzzle, solvePuzzle } from "./solver";
+import { parsePuzzle, solvePuzzle } from "@/app/deduction/solver";
 
 describe("deduction solver", () => {
   test("一意解の問題を解ける", () => {
