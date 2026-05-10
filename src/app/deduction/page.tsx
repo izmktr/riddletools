@@ -17,6 +17,7 @@ const SAMPLE_INPUT = `名前[一郎,次郎,花子]
 
 export default function DeductionPage() {
   const [showManual, setShowManual] = useState(false);
+  const [showGrammar, setShowGrammar] = useState(false);
   const [input, setInput] = useState("");
   const [result, setResult] = useState<SolveResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +83,12 @@ export default function DeductionPage() {
           使い方
         </button>
         <button
+          className="px-4 py-2 bg-emerald-100 text-emerald-800 rounded hover:bg-emerald-200"
+          onClick={() => setShowGrammar(true)}
+        >
+          文法
+        </button>
+        <button
           className="px-4 py-2 bg-green-100 text-green-800 rounded hover:bg-green-200"
           onClick={() => {
             setInput(SAMPLE_INPUT);
@@ -114,8 +121,95 @@ export default function DeductionPage() {
         </div>
       )}
 
+      {showGrammar && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded shadow-lg p-6 max-w-3xl w-full max-h-[85vh] overflow-auto relative space-y-4">
+            <button
+              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
+              onClick={() => setShowGrammar(false)}
+            >
+              閉じる
+            </button>
+
+            <h2 className="text-xl font-bold pr-16">文法ガイド</h2>
+            <p className="text-sm text-gray-700">
+              このスクリプトは、上から順にカテゴリ定義と条件定義を並べて記述します。条件行はすべてANDで評価されます。
+            </p>
+
+            <section className="space-y-2">
+              <h3 className="font-semibold">1. 基本ルール</h3>
+              <ul className="list-disc pl-5 text-sm space-y-1">
+                <li>1行に1つの定義を書きます。</li>
+                <li>半角スペースとタブは無視されます。</li>
+                <li># 以降はコメントとして無視されます。</li>
+                <li>カテゴリ名・値名には . , [ ] と空白は使えません。</li>
+              </ul>
+            </section>
+
+            <section className="space-y-2">
+              <h3 className="font-semibold">2. カテゴリ定義</h3>
+              <pre className="bg-gray-50 border rounded p-3 text-xs overflow-x-auto">
+{`カテゴリ名[値1,値2,値3]
+カテゴリ名[]`}
+              </pre>
+              <ul className="list-disc pl-5 text-sm space-y-1">
+                <li>最初のカテゴリは1個以上の値が必要です。</li>
+                <li>以降のカテゴリは、最初と同じ値数か空配列 [] を指定します。</li>
+                <li>[] を使うと 1,2,3,... の連番が自動補完されます。</li>
+              </ul>
+            </section>
+
+            <section className="space-y-2">
+              <h3 className="font-semibold">3. 等号条件</h3>
+              <pre className="bg-gray-50 border rounded p-3 text-xs overflow-x-auto">
+{`一郎=カツ丼
+次郎!=カレー
+一郎=カレー,ハンバーグ
+次郎.順位=2
+一郎.順位=次郎.順位+1`}
+              </pre>
+              <ul className="list-disc pl-5 text-sm space-y-1">
+                <li>= は同じセット、!= は別セットを意味します。</li>
+                <li>右辺をカンマ区切りで複数指定できます。</li>
+                <li>= の右辺リストは OR、!= の右辺リストは AND として評価します。</li>
+                <li>左辺・右辺ともにカテゴリ名は省略可能ですが、曖昧ならエラーになります。</li>
+              </ul>
+            </section>
+
+            <section className="space-y-2">
+              <h3 className="font-semibold">4. 不等号条件と算術式</h3>
+              <pre className="bg-gray-50 border rounded p-3 text-xs overflow-x-auto">
+{`一郎.値段<次郎
+一郎.値段<=900
+一郎.価格<次郎.価格*2`}
+              </pre>
+              <ul className="list-disc pl-5 text-sm space-y-1">
+                <li>比較演算子は &lt;, &gt;, &lt;=, &gt;= が使えます。</li>
+                <li>算術式では +, -, *, / が使えます。</li>
+                <li>数値に変換できない値は、カテゴリ内の位置 (1起源) で比較されます。</li>
+              </ul>
+            </section>
+
+            <section className="space-y-2">
+              <h3 className="font-semibold">5. 最小サンプル</h3>
+              <pre className="bg-gray-50 border rounded p-3 text-xs overflow-x-auto">
+{`名前[一郎,次郎,花子]
+食べ物[カツ丼,ハンバーグ,カレー]
+値段[800,900,1000]
+順位[]
+一郎=カツ丼
+次郎=ハンバーグ
+花子=1000
+一郎.順位<次郎
+次郎.順位<花子`}
+              </pre>
+            </section>
+          </div>
+        </div>
+      )}
+
       <p className="text-sm text-gray-700">
-        仕様どおりの定義文を入力して、条件を満たすすべての解を探索します。
+        推理パズルを解きます。
       </p>
 
       <textarea
