@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import Encoding from 'encoding-japanese';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
@@ -9,7 +10,6 @@ export default function DateCalcPage() {
   const [date1Text, setDate1Text] = useState('');
   const [date2Text, setDate2Text] = useState('');
   const [result, setResult] = useState<string>('');
-  const [error, setError] = useState<string>('');
   const [selectedWeekdays, setSelectedWeekdays] = useState<boolean[]>([
     false, false, false, false, false, false, false
   ]);
@@ -17,10 +17,9 @@ export default function DateCalcPage() {
   const [weekdayCounts, setWeekdayCounts] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
   const [holidayCounts, setHolidayCounts] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
   const [holidayData, setHolidayData] = useState<Map<string, string>>(new Map());
+  const date1PickerRef = useRef<HTMLInputElement>(null);
+  const date2PickerRef = useRef<HTMLInputElement>(null);
   
-  const date1InputRef = useRef<HTMLInputElement>(null);
-  const date2InputRef = useRef<HTMLInputElement>(null);
-
   // 祝日CSVを読み込み
   useEffect(() => {
     const loadHolidays = async () => {
@@ -67,31 +66,12 @@ export default function DateCalcPage() {
     loadHolidays();
   }, []);
 
-  // 日付の妥当性チェックと日数計算
+  // 日付変換に成功した場合のみ日数を計算
   useEffect(() => {
-    setError('');
     setResult('');
 
     if (!date1Text && !date2Text) {
       return;
-    }
-
-    // 日付1のチェック
-    if (date1Text) {
-      const date1 = parseDate(date1Text);
-      if (!date1) {
-        setError('日付1が有効な日付ではありません');
-        return;
-      }
-    }
-
-    // 日付2のチェック
-    if (date2Text) {
-      const date2 = parseDate(date2Text);
-      if (!date2) {
-        setError('日付2が有効な日付ではありません');
-        return;
-      }
     }
 
     // 両方入力されている場合のみ日数を計算
@@ -149,6 +129,19 @@ export default function DateCalcPage() {
     const newSelected = [...selectedWeekdays];
     newSelected[index] = !newSelected[index];
     setSelectedWeekdays(newSelected);
+  };
+
+  const clearWeekdaySelection = () => {
+    setSelectedWeekdays([false, false, false, false, false, false, false]);
+    setIncludeUnselectedHolidays(false);
+  };
+
+  const selectWeekdays = () => {
+    setSelectedWeekdays([false, true, true, true, true, true, false]);
+  };
+
+  const selectWeekend = () => {
+    setSelectedWeekdays([true, false, false, false, false, false, true]);
   };
 
   // 選択された曜日の合計日数を計算
@@ -228,27 +221,76 @@ export default function DateCalcPage() {
     ];
   };
 
-  // 日付文字列をパース
-  const parseDate = (dateStr: string): Date | null => {
-    if (!dateStr) return null;
-    
-    // YYYY-MM-DD, YYYY/MM/DD, YYYYMMDD などの形式に対応
-    const normalized = dateStr.replace(/\//g, '-').replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
-    const date = new Date(normalized);
-    
-    // 無効な日付の場合
-    if (isNaN(date.getTime())) {
+  const buildValidDate = (year: number, month: number, day: number): Date | null => {
+    const date = new Date(year, month - 1, day);
+    if (
+      date.getFullYear() !== year ||
+      date.getMonth() !== month - 1 ||
+      date.getDate() !== day
+    ) {
       return null;
     }
-    
     return date;
   };
 
-  // カレンダーボタンのクリック
-  const openCalendar = (inputRef: React.RefObject<HTMLInputElement | null>) => {
-    if (inputRef.current) {
-      inputRef.current.showPicker();
+  const addMonths = (baseDate: Date, months: number): Date => {
+    const date = new Date(baseDate);
+    date.setMonth(date.getMonth() + months);
+    return date;
+  };
+
+  // 日付文字列をパース
+  const parseDate = (dateStr: string): Date | null => {
+    if (!dateStr) return null;
+
+    const trimmed = dateStr.trim();
+    const normalized = trimmed.replace(/\//g, '-');
+
+    // YYYY-MM-DD, YYYY/M/D, YYYYMMDD
+    let match = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (!match) {
+      match = normalized.match(/^(\d{4})(\d{2})(\d{2})$/);
     }
+    if (match) {
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      const day = Number(match[3]);
+      return buildValidDate(year, month, day);
+    }
+
+    // 年省略形式: M-D, MM-DD, M/D, MM/DD, MMDD
+    let month: number | null = null;
+    let day: number | null = null;
+
+    const shortMatch = normalized.match(/^(\d{1,2})-(\d{1,2})$/);
+    if (shortMatch) {
+      month = Number(shortMatch[1]);
+      day = Number(shortMatch[2]);
+    } else {
+      const compactShortMatch = normalized.match(/^(\d{4})$/);
+      if (compactShortMatch) {
+        month = Number(compactShortMatch[1].slice(0, 2));
+        day = Number(compactShortMatch[1].slice(2, 4));
+      }
+    }
+
+    if (month === null || day === null) {
+      return null;
+    }
+
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const dateWithCurrentYear = buildValidDate(currentYear, month, day);
+    if (!dateWithCurrentYear) {
+      return null;
+    }
+
+    const nineMonthsLater = addMonths(today, 9);
+    if (dateWithCurrentYear.getTime() >= nineMonthsLater.getTime()) {
+      return buildValidDate(currentYear - 1, month, day);
+    }
+
+    return dateWithCurrentYear;
   };
 
   // カレンダーから日付が選択された時
@@ -263,228 +305,294 @@ export default function DateCalcPage() {
     }
   };
 
+  const openCalendar = (inputRef: React.RefObject<HTMLInputElement | null>) => {
+    const input = inputRef.current;
+    if (!input) return;
+
+    try {
+      if (typeof input.showPicker === 'function') {
+        input.showPicker();
+        return;
+      }
+    } catch {
+      // showPicker が使えない環境では click にフォールバック
+    }
+
+    input.focus();
+    input.click();
+  };
+
+  const recognizedDate1 = parseDate(date1Text);
+  const recognizedDate2 = parseDate(date2Text);
+
+  const formatRecognizedDate = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}/${month}/${day}(${WEEKDAYS[date.getDay()]})`;
+  };
+
+  const rangePreviewText = recognizedDate1 && recognizedDate2
+    ? `${formatRecognizedDate(recognizedDate1)}～${formatRecognizedDate(recognizedDate2)}`
+    : recognizedDate1
+      ? `${formatRecognizedDate(recognizedDate1)}～`
+      : recognizedDate2
+        ? `～${formatRecognizedDate(recognizedDate2)}`
+        : '';
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8">
-      <div className="max-w-2xl mx-auto">
-        <h1 className="text-4xl font-bold text-center mb-8 text-indigo-900">
-          日付計算ツール
-        </h1>
-        
-        <div className="bg-white rounded-lg shadow-lg p-8">
-          <div className="space-y-6">
-            {/* 日付1入力 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                日付1
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={date1Text}
-                  onChange={(e) => setDate1Text(e.target.value)}
-                  placeholder="YYYY-MM-DD"
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
-                <button
-                  onClick={() => openCalendar(date1InputRef)}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors"
-                  title="カレンダーを開く"
-                >
-                  📅
-                </button>
-                <input
-                  ref={date1InputRef}
-                  type="date"
-                  onChange={(e) => handleCalendarChange(e, setDate1Text)}
-                  className="hidden"
-                />
-              </div>
-            </div>
+    <main className="max-w-xl mx-auto p-6">
+      <div className="mb-4">
+        <Link href="/" className="text-blue-500 hover:text-blue-700 text-sm">
+          ← トップに戻る
+        </Link>
+      </div>
 
-            {/* 日付2入力 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                日付2
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={date2Text}
-                  onChange={(e) => setDate2Text(e.target.value)}
-                  placeholder="YYYY-MM-DD"
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
-                <button
-                  onClick={() => openCalendar(date2InputRef)}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors"
-                  title="カレンダーを開く"
-                >
-                  📅
-                </button>
-                <input
-                  ref={date2InputRef}
-                  type="date"
-                  onChange={(e) => handleCalendarChange(e, setDate2Text)}
-                  className="hidden"
-                />
-              </div>
-            </div>
+      <h1 className="text-2xl font-bold mb-4">日付計算ツール</h1>
 
-            {/* 結果表示 */}
-            <div className="mt-8 pt-6 border-t border-gray-200">
-              {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
-                  <p className="font-medium">エラー</p>
-                  <p>{error}</p>
-                </div>
-              )}
-              
-              {result && !error && (
-                <div className="space-y-4">
-                  <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-md">
-                    <p className="font-medium">日数の差</p>
-                    <p className="text-3xl font-bold mt-2">{result}</p>
-                  </div>
-                  
-                  {/* 曜日選択チェックボックス */}
-                  <div className="bg-blue-50 border border-blue-200 px-4 py-3 rounded-md">
-                    <p className="font-medium text-blue-900 mb-3">曜日を指定してカウント</p>
-                    <div className="flex flex-wrap gap-3">
-                      {WEEKDAYS.map((day, index) => {
-                        // 日曜日は赤、土曜日は青、その他は通常の色
-                        const bgColorClass = index === 0 
-                          ? 'bg-red-50 border-red-300 hover:bg-red-100'
-                          : index === 6 
-                          ? 'bg-blue-100 border-blue-400 hover:bg-blue-200'
-                          : 'bg-white border-blue-300 hover:bg-blue-100';
-                        
-                        const textColorClass = index === 0
-                          ? 'text-red-700'
-                          : index === 6
-                          ? 'text-blue-700'
-                          : 'text-gray-700';
-                        
-                        return (
-                          <label
-                            key={index}
-                            className={`flex items-center gap-2 cursor-pointer px-3 py-2 rounded border ${bgColorClass} transition-colors`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedWeekdays[index]}
-                              onChange={() => toggleWeekday(index)}
-                              className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className={`text-sm font-medium ${textColorClass}`}>
-                              {day}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                              ({weekdayCounts[index]}回)
-                            </span>
-                          </label>
-                        );
-                      })}
-                      
-                      {/* ＋祝日ボタン */}
-                      <label className="flex items-center gap-2 cursor-pointer bg-yellow-50 px-3 py-2 rounded border border-yellow-300 hover:bg-yellow-100 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={includeUnselectedHolidays}
-                          onChange={(e) => setIncludeUnselectedHolidays(e.target.checked)}
-                          className="w-4 h-4 text-yellow-600 rounded focus:ring-2 focus:ring-yellow-500"
-                        />
-                        <span className="text-sm font-medium text-yellow-900">
-                          ＋祝日
-                        </span>
-                      </label>
-                    </div>
-                    
-                    {/* 選択された曜日の合計 */}
-                    {selectedWeekdays.some(selected => selected) && (
-                      <div className="mt-4 pt-3 border-t border-blue-300">
-                        <p className="text-sm text-blue-900 mb-2">
-                          選択した曜日の合計{includeUnselectedHolidays && '（＋未選択曜日の祝日）'}: 
-                          <span className="text-2xl font-bold ml-2">
-                            {getSelectedWeekdaysCount()}日
-                          </span>
-                        </p>
-                        <div className="flex gap-4 text-sm">
-                          <p className="text-blue-800">
-                            祝日を含む: <span className="font-semibold">{getSelectedHolidaysCount()}日</span>
-                          </p>
-                          <p className="text-blue-800">
-                            祝日を含まない: <span className="font-semibold">{getSelectedWeekdaysCount() - getSelectedHolidaysCount()}日</span>
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* 期間内の祝日リスト */}
-                  {(() => {
-                    const holidayList = getHolidaysInRange();
-                    const displayList = formatHolidayList(holidayList);
-                    
-                    if (holidayList.length > 0) {
-                      return (
-                        <div className="bg-yellow-50 border border-yellow-200 px-4 py-3 rounded-md">
-                          <p className="font-medium text-yellow-900 mb-2">
-                            期間内の祝日 ({holidayList.length}件)
-                          </p>
-                          <div className="space-y-1 text-sm">
-                            {displayList?.map((holiday, index) => (
-                              holiday.date === '...' ? (
-                                <div key={index} className="text-center text-gray-500 py-1">
-                                  ～
-                                </div>
-                              ) : (
-                                <div key={index} className="flex items-center gap-2">
-                                  <span className="text-gray-600 font-mono">
-                                    {holiday.date}
-                                  </span>
-                                  <span className="text-yellow-900">
-                                    {holiday.name}
-                                  </span>
-                                  <span className={`text-xs font-semibold ${
-                                    holiday.dayOfWeek === '日' ? 'text-red-600' :
-                                    holiday.dayOfWeek === '土' ? 'text-blue-600' :
-                                    'text-gray-600'
-                                  }`}>
-                                    ({holiday.dayOfWeek})
-                                  </span>
-                                </div>
-                              )
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    }
-                    return null;
-                  })()}
-                </div>
-              )}
-              
-              {!error && !result && date1Text && date2Text && (
-                <div className="bg-gray-50 border border-gray-200 text-gray-700 px-4 py-3 rounded-md">
-                  <p>日付を入力してください</p>
-                </div>
-              )}
-            </div>
-
-            {/* 使い方の説明 */}
-            <div className="mt-6 text-sm text-gray-600">
-              <p className="font-medium mb-2">使い方：</p>
-              <ul className="list-disc list-inside space-y-1">
-                <li>テキストボックスに日付を入力（YYYY-MM-DD形式）</li>
-                <li>📅 ボタンをクリックしてカレンダーから日付を選択</li>
-                <li>2つの日付を入力すると自動的に日数の差を計算します</li>
-                <li>曜日のチェックボックスで指定した曜日の出現回数を確認できます</li>
-                <li>対応形式: 2024-03-19, 2024/03/19, 20240319</li>
-              </ul>
+      <div className="space-y-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-semibold whitespace-nowrap">日付1</label>
+            <input
+              type="text"
+              value={date1Text}
+              onChange={(e) => setDate1Text(e.target.value)}
+              placeholder="YYYY-MM-DD"
+              className="flex-1 p-2 border rounded"
+            />
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => openCalendar(date1PickerRef)}
+                className="px-3 py-2 bg-blue-200 rounded hover:bg-blue-300"
+                title="カレンダーを開く"
+              >
+                📅
+              </button>
+              <input
+                ref={date1PickerRef}
+                type="date"
+                onChange={(e) => handleCalendarChange(e, setDate1Text)}
+                className="absolute top-0 left-0 w-px h-px opacity-0 pointer-events-none"
+                aria-label="日付1をカレンダーで選択"
+                tabIndex={-1}
+                aria-hidden="true"
+              />
             </div>
           </div>
         </div>
+
+        <div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-semibold whitespace-nowrap">日付2</label>
+            <input
+              type="text"
+              value={date2Text}
+              onChange={(e) => setDate2Text(e.target.value)}
+              placeholder="YYYY-MM-DD"
+              className="flex-1 p-2 border rounded"
+            />
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => openCalendar(date2PickerRef)}
+                className="px-3 py-2 bg-blue-200 rounded hover:bg-blue-300"
+                title="カレンダーを開く"
+              >
+                📅
+              </button>
+              <input
+                ref={date2PickerRef}
+                type="date"
+                onChange={(e) => handleCalendarChange(e, setDate2Text)}
+                className="absolute top-0 left-0 w-px h-px opacity-0 pointer-events-none"
+                aria-label="日付2をカレンダーで選択"
+                tabIndex={-1}
+                aria-hidden="true"
+              />
+            </div>
+          </div>
+          {rangePreviewText && (
+            <p className="text-sm text-blue-700 mt-2">
+              <span className="font-semibold">{rangePreviewText}</span>
+            </p>
+          )}
+        </div>
+
+        {result && (
+          <div className="space-y-4">
+            <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded">
+              <p className="font-medium">日数の差 {result}</p>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 px-4 py-3 rounded">
+              <p className="font-medium text-blue-900 mb-3">曜日を指定してカウント</p>
+              <div className="mb-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={clearWeekdaySelection}
+                  className="px-3 py-2 rounded border border-gray-300 bg-white text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                >
+                  全解除
+                </button>
+                <button
+                  type="button"
+                  onClick={selectWeekdays}
+                  className="px-3 py-2 rounded border border-blue-300 bg-white text-sm font-medium text-blue-900 transition-colors hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  月～金
+                </button>
+                <button
+                  type="button"
+                  onClick={selectWeekend}
+                  className="px-3 py-2 rounded border border-blue-300 bg-white text-sm font-medium text-blue-900 transition-colors hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  土日
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIncludeUnselectedHolidays((current) => !current)}
+                  className={`px-3 py-2 rounded border text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-yellow-500 ${includeUnselectedHolidays ? 'bg-yellow-300 border-yellow-500 text-yellow-950' : 'bg-yellow-50 border-yellow-300 text-yellow-900 hover:bg-yellow-100'}`}
+                  aria-pressed={includeUnselectedHolidays}
+                >
+                  ＋祝日
+                </button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full border border-blue-200 border-collapse bg-white">
+                  <tbody>
+                    <tr>
+                      <th className="border border-blue-200 bg-blue-100 px-3 py-2 text-sm font-semibold text-blue-900 whitespace-nowrap">
+                        曜日
+                      </th>
+                      {WEEKDAYS.map((day, index) => {
+                        const isSelected = selectedWeekdays[index];
+                        const textColorClass = index === 0
+                          ? 'text-red-700'
+                          : index === 6
+                            ? 'text-blue-700'
+                            : 'text-gray-700';
+
+                        return (
+                          <td key={`weekday-${index}`} className="border border-blue-200 p-0">
+                            <button
+                              type="button"
+                              onClick={() => toggleWeekday(index)}
+                              className={`w-full px-3 py-2 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset ${isSelected ? 'bg-blue-500 text-white' : 'bg-white hover:bg-blue-100'} ${isSelected ? '' : textColorClass}`}
+                              aria-pressed={isSelected}
+                            >
+                              {day}
+                            </button>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    <tr>
+                      <th className="border border-blue-200 bg-blue-100 px-3 py-2 text-sm font-semibold text-blue-900 whitespace-nowrap">
+                        回数(祝日)
+                      </th>
+                      {WEEKDAYS.map((day, index) => {
+                        const isSelected = selectedWeekdays[index];
+                        const textColorClass = index === 0
+                          ? 'text-red-700'
+                          : index === 6
+                            ? 'text-blue-700'
+                            : 'text-gray-700';
+
+                        return (
+                          <td key={`count-${day}`} className="border border-blue-200 p-0">
+                            <button
+                              type="button"
+                              onClick={() => toggleWeekday(index)}
+                              className={`w-full px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset ${isSelected ? 'bg-blue-500 text-white' : 'bg-white hover:bg-blue-100'} ${isSelected ? '' : textColorClass}`}
+                              aria-pressed={isSelected}
+                              aria-label={`${day}曜日 ${weekdayCounts[index]}回 祝日${holidayCounts[index]}回`}
+                            >
+                              {weekdayCounts[index]}({holidayCounts[index]})
+                            </button>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {selectedWeekdays.some((selected) => selected) && (
+                <div className="mt-4 pt-3 border-t border-blue-300">
+                  <p className="text-sm text-blue-900 mb-2">
+                    選択した曜日の合計{includeUnselectedHolidays && '（＋未選択曜日の祝日）'}:
+                    <span className="text-2xl font-bold ml-2">{getSelectedWeekdaysCount()}日</span>
+                  </p>
+                  <div className="flex gap-4 text-sm">
+                    <p className="text-blue-800">
+                      祝日を含む: <span className="font-semibold">{getSelectedHolidaysCount()}日</span>
+                    </p>
+                    <p className="text-blue-800">
+                      祝日を含まない: <span className="font-semibold">{getSelectedWeekdaysCount() - getSelectedHolidaysCount()}日</span>
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {(() => {
+              const holidayList = getHolidaysInRange();
+              const displayList = formatHolidayList(holidayList);
+
+              if (holidayList.length > 0) {
+                return (
+                  <div className="bg-yellow-50 border border-yellow-200 px-4 py-3 rounded">
+                    <p className="font-medium text-yellow-900 mb-2">期間内の祝日 ({holidayList.length}件)</p>
+                    <div className="space-y-1 text-sm">
+                      {displayList?.map((holiday, index) => (
+                        holiday.date === '...' ? (
+                          <div key={index} className="text-center text-gray-500 py-1">～</div>
+                        ) : (
+                          <div key={index} className="flex items-center gap-2">
+                            <span className="text-gray-600 font-mono">{holiday.date}</span>
+                            <span className="text-yellow-900">{holiday.name}</span>
+                            <span
+                              className={`text-xs font-semibold ${
+                                holiday.dayOfWeek === '日'
+                                  ? 'text-red-600'
+                                  : holiday.dayOfWeek === '土'
+                                    ? 'text-blue-600'
+                                    : 'text-gray-600'
+                              }`}
+                            >
+                              ({holiday.dayOfWeek})
+                            </span>
+                          </div>
+                        )
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+          </div>
+        )}
+
+        {!result && date1Text && date2Text && (
+          <div className="bg-gray-50 border border-gray-200 text-gray-700 px-4 py-3 rounded">
+            <p>有効な2つの日付を入力すると日数の差を計算します</p>
+          </div>
+        )}
+
+        <div className="text-sm text-gray-600 border-t pt-4">
+          <p className="font-medium mb-2">使い方：</p>
+          <ul className="list-disc list-inside space-y-1">
+            <li>テキストボックスに日付を入力（YYYY-MM-DD形式）</li>
+            <li>📅 ボタンをクリックしてカレンダーから日付を選択</li>
+            <li>2つの日付を入力すると自動的に日数の差を計算します</li>
+            <li>曜日のチェックボックスで指定した曜日の出現回数を確認できます</li>
+            <li>対応形式: 2024-03-19, 2024/03/19, 20240319</li>
+          </ul>
+        </div>
       </div>
-    </div>
+    </main>
   );
 }
