@@ -28,22 +28,36 @@ interface Intersection{
 interface ExportData {
   words: string;
   board: CellState[][];
+  boardWidth?: number;
+  boardHeight?: number;
 }
 
 interface CompressedData {
   words: string;
   board: {x: number, y: number, w: number, h: number, v: string};
+  boardWidth?: number;
+  boardHeight?: number;
 }
 
 const BOARD_WIDTH = 24;
 const BOARD_HEIGHT = 16;
 
+const createEmptyBoard = (width: number, height: number): CellState[][] =>
+  Array.from({ length: height }, () => Array.from({ length: width }, () => "white" as CellState));
+
+const normalizeBoard = (board: CellState[][], width: number, height: number): CellState[][] =>
+  Array.from({ length: height }, (_, row) =>
+    Array.from({ length: width }, (_, col) => board[row]?.[col] ?? "white")
+  );
+
 export default function SkeletonPage() {
   const [showManual, setShowManual] = useState(false);
   const [words, setWords] = useState("");
-  const [board, setBoard] = useState<CellState[][]>(
-    Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill("white"))
-  );
+  const [boardWidth, setBoardWidth] = useState(BOARD_WIDTH);
+  const [boardHeight, setBoardHeight] = useState(BOARD_HEIGHT);
+  const [boardWidthDraft, setBoardWidthDraft] = useState(BOARD_WIDTH);
+  const [boardHeightDraft, setBoardHeightDraft] = useState(BOARD_HEIGHT);
+  const [board, setBoard] = useState<CellState[][]>(() => createEmptyBoard(BOARD_WIDTH, BOARD_HEIGHT));
   const [isDragging, setIsDragging] = useState(false);
   const [dragMode, setDragMode] = useState<CellState>("white");
   const [unusedWords, setUnusedWords] = useState<string[]>([]);
@@ -57,6 +71,22 @@ export default function SkeletonPage() {
     boardByLength: Map<number, number>;
   } | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
+
+  const resizeBoard = useCallback((nextWidth: number, nextHeight: number) => {
+    setBoard((currentBoard) => {
+      const resizedBoard = createEmptyBoard(nextWidth, nextHeight);
+      for (let row = 0; row < Math.min(currentBoard.length, nextHeight); row++) {
+        for (let col = 0; col < Math.min(currentBoard[row].length, nextWidth); col++) {
+          resizedBoard[row][col] = currentBoard[row][col];
+        }
+      }
+      return resizedBoard;
+    });
+    setBoardWidth(nextWidth);
+    setBoardHeight(nextHeight);
+    setBoardWidthDraft(nextWidth);
+    setBoardHeightDraft(nextHeight);
+  }, []);
 
   // データ解凍関数
   const decompressData = useCallback((compressed: string): ExportData | CompressedData | null => {
@@ -98,11 +128,6 @@ export default function SkeletonPage() {
       const restored = pako.inflate(bytes, { to: 'string' });
       const data = JSON.parse(restored);
       
-      // 新しい圧縮形式のボードデータを復元
-      if (data.board && typeof data.board === 'object' && 'x' in data.board) {
-        data.board = restoreBoard(data.board);
-      }
-      
       return data;
     } catch (pakoError) {
       // pakoが失敗した場合
@@ -124,8 +149,18 @@ export default function SkeletonPage() {
           if (data.words) {
             setWords(data.words);
           }
-          if (data.board && Array.isArray(data.board) && data.board.length === BOARD_HEIGHT) {
-            setBoard(data.board);
+          if (data.board) {
+            const restoredWidth = data.boardWidth ?? BOARD_WIDTH;
+            const restoredHeight = data.boardHeight ?? BOARD_HEIGHT;
+            const restoredBoard = Array.isArray(data.board)
+              ? data.board
+              : restoreBoard(data.board, restoredWidth, restoredHeight);
+
+            setBoardWidth(restoredWidth);
+            setBoardHeight(restoredHeight);
+            setBoardWidthDraft(restoredWidth);
+            setBoardHeightDraft(restoredHeight);
+            setBoard(normalizeBoard(restoredBoard, restoredWidth, restoredHeight));
           }
         }
       } catch (e) {
@@ -165,11 +200,11 @@ export default function SkeletonPage() {
   // ボードを効率的に圧縮、復元する関数
   const compressBoard = (board: CellState[][]): {x: number, y: number, w: number, h: number, v: string} => {
     // 黄色のマスの範囲を特定
-    let minX = BOARD_WIDTH, maxX = -1;
-    let minY = BOARD_HEIGHT, maxY = -1;
+    let minX = boardWidth, maxX = -1;
+    let minY = boardHeight, maxY = -1;
     
-    for (let row = 0; row < BOARD_HEIGHT; row++) {
-      for (let col = 0; col < BOARD_WIDTH; col++) {
+    for (let row = 0; row < boardHeight; row++) {
+      for (let col = 0; col < boardWidth; col++) {
         if (board[row][col] === "yellow") {
           minX = Math.min(minX, col);
           maxX = Math.max(maxX, col);
@@ -204,9 +239,13 @@ export default function SkeletonPage() {
     };
   };
 
-  const restoreBoard = (compressed: {x: number, y: number, w: number, h: number, v: string}): CellState[][] => {
+  const restoreBoard = (
+    compressed: {x: number, y: number, w: number, h: number, v: string},
+    width: number,
+    height: number
+  ): CellState[][] => {
     // 初期化（全て白）
-    const board: CellState[][] = Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill("white"));
+    const board: CellState[][] = createEmptyBoard(width, height);
     
     // データがない場合は白いボードを返す
     if (compressed.w === 0 || compressed.h === 0 || !compressed.v) {
@@ -222,7 +261,7 @@ export default function SkeletonPage() {
           const boardCol = compressed.x + col;
           
           // ボード範囲内かチェック
-          if (boardRow >= 0 && boardRow < BOARD_HEIGHT && boardCol >= 0 && boardCol < BOARD_WIDTH) {
+          if (boardRow >= 0 && boardRow < height && boardCol >= 0 && boardCol < width) {
             board[boardRow][boardCol] = compressed.v[index] === "1" ? "yellow" : "white";
           }
           index++;
@@ -237,7 +276,9 @@ export default function SkeletonPage() {
   const handleExport = () => {
     const data = {
       words: words,
-      board: board
+      board: board,
+      boardWidth: boardWidth,
+      boardHeight: boardHeight
     };
     
     const compressed = compressData(data);
@@ -262,7 +303,9 @@ export default function SkeletonPage() {
   const handleSample = () => {
     setWords("かんでんち\nでんわせん\nわしんとん\nかしわ\nわだい");
     // サンプル用のボード設定（十字の形）
-    const newBoard = Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill("white"));
+    const newBoard = createEmptyBoard(boardWidth, boardHeight);
+    const targetRowOffset = Math.max(0, Math.floor((boardHeight - 5) / 2));
+    const targetColOffset = Math.max(0, Math.floor((boardWidth - 5) / 2));
     const sampleBoard = [
       [1, 1, 1, 1, 1],
       [0, 0, 1, 0, 0],
@@ -273,7 +316,11 @@ export default function SkeletonPage() {
     for (let col = 0; col < 5; col++) {
       for (let row = 0; row < 5; row++) {
         if (sampleBoard[row][col] === 1) {
-          newBoard[row + 5][col + 9] = "yellow";
+          const targetRow = row + targetRowOffset;
+          const targetCol = col + targetColOffset;
+          if (targetRow < boardHeight && targetCol < boardWidth) {
+            newBoard[targetRow][targetCol] = "yellow";
+          }
         }
       }
     }
@@ -288,10 +335,125 @@ export default function SkeletonPage() {
   // リセット
   const handleReset = () => {
     setWords("");
-    setBoard(Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill("white")));
+    setBoard(createEmptyBoard(boardWidth, boardHeight));
     setUnusedWords([]);
     setSolvedGrid(null);
     setWordStats(null);
+  };
+
+  const handleApplyBoardSize = () => {
+    const safeWidth = Number.isFinite(boardWidthDraft) ? boardWidthDraft : BOARD_WIDTH;
+    const safeHeight = Number.isFinite(boardHeightDraft) ? boardHeightDraft : BOARD_HEIGHT;
+    const nextWidth = Math.max(2, Math.min(60, Math.floor(safeWidth)));
+    const nextHeight = Math.max(2, Math.min(60, Math.floor(safeHeight)));
+    resizeBoard(nextWidth, nextHeight);
+    setUnusedWords([]);
+    setSolvedGrid(null);
+    setWordStats(null);
+  };
+
+  const clearAnalysisResult = () => {
+    setUnusedWords([]);
+    setSolvedGrid(null);
+    setWordStats(null);
+  };
+
+  const getBoardGaps = (targetBoard: CellState[][]) => {
+    const height = targetBoard.length;
+    const width = targetBoard[0]?.length ?? 0;
+
+    let hasYellow = false;
+    for (let row = 0; row < height; row++) {
+      for (let col = 0; col < width; col++) {
+        if (targetBoard[row][col] === "yellow") {
+          hasYellow = true;
+          break;
+        }
+      }
+      if (hasYellow) break;
+    }
+
+    let top = 0;
+    while (top < height && targetBoard[top].every((cell) => cell === "white")) {
+      top++;
+    }
+
+    let bottom = 0;
+    while (bottom < height && targetBoard[height - 1 - bottom].every((cell) => cell === "white")) {
+      bottom++;
+    }
+
+    let left = 0;
+    while (left < width && targetBoard.every((row) => row[left] === "white")) {
+      left++;
+    }
+
+    let right = 0;
+    while (right < width && targetBoard.every((row) => row[width - 1 - right] === "white")) {
+      right++;
+    }
+
+    return { top, bottom, left, right, hasYellow };
+  };
+
+  const applyBoardAndSize = (nextBoard: CellState[][]) => {
+    const nextHeight = nextBoard.length;
+    const nextWidth = nextBoard[0]?.length ?? 0;
+    if (nextWidth === 0 || nextHeight === 0) {
+      return;
+    }
+    setBoard(nextBoard);
+    setBoardWidth(nextWidth);
+    setBoardHeight(nextHeight);
+    setBoardWidthDraft(nextWidth);
+    setBoardHeightDraft(nextHeight);
+    clearAnalysisResult();
+  };
+
+  const handleFitBoard = () => {
+    const gaps = getBoardGaps(board);
+    if (!gaps.hasYellow) {
+      return;
+    }
+
+    const nextWidth = boardWidth - gaps.left - gaps.right;
+    const nextHeight = boardHeight - gaps.top - gaps.bottom;
+    const nextBoard = createEmptyBoard(nextWidth, nextHeight);
+
+    for (let row = 0; row < nextHeight; row++) {
+      for (let col = 0; col < nextWidth; col++) {
+        nextBoard[row][col] = board[row + gaps.top][col + gaps.left];
+      }
+    }
+
+    applyBoardAndSize(nextBoard);
+  };
+
+  const handleExpandBoard = () => {
+    const gaps = getBoardGaps(board);
+    if (!gaps.hasYellow) {
+      return;
+    }
+
+    const minGap = Math.min(gaps.top, gaps.bottom, gaps.left, gaps.right);
+    const addTop = gaps.top === minGap ? 1 : 0;
+    const addBottom = gaps.bottom === minGap ? 1 : 0;
+    const addLeft = gaps.left === minGap ? 1 : 0;
+    const addRight = gaps.right === minGap ? 1 : 0;
+
+    const nextWidth = boardWidth + addLeft + addRight;
+    const nextHeight = boardHeight + addTop + addBottom;
+    const nextBoard = createEmptyBoard(nextWidth, nextHeight);
+
+    for (let row = 0; row < boardHeight; row++) {
+      for (let col = 0; col < boardWidth; col++) {
+        if (board[row][col] === "yellow") {
+          nextBoard[row + addTop][col + addLeft] = "yellow";
+        }
+      }
+    }
+
+    applyBoardAndSize(nextBoard);
   };
 
   // マスのクリック
@@ -328,10 +490,10 @@ export default function SkeletonPage() {
     const words: Slot[] = [];
     
     // 横方向をチェック
-    for (let row = 0; row < BOARD_HEIGHT; row++) {
+    for (let row = 0; row < boardHeight; row++) {
       let start = -1;
-      for (let col = 0; col <= BOARD_WIDTH; col++) {
-        if (col < BOARD_WIDTH && board[row][col] === "yellow") {
+      for (let col = 0; col <= boardWidth; col++) {
+        if (col < boardWidth && board[row][col] === "yellow") {
           if (start === -1) start = col;
         } else {
           if (start !== -1 && col - start >= 2) {
@@ -353,10 +515,10 @@ export default function SkeletonPage() {
     }
 
     // 縦方向をチェック
-    for (let col = 0; col < BOARD_WIDTH; col++) {
+    for (let col = 0; col < boardWidth; col++) {
       let start = -1;
-      for (let row = 0; row <= BOARD_HEIGHT; row++) {
-        if (row < BOARD_HEIGHT && board[row][col] === "yellow") {
+      for (let row = 0; row <= boardHeight; row++) {
+        if (row < boardHeight && board[row][col] === "yellow") {
           if (start === -1) start = row;
         } else {
           if (start !== -1 && row - start >= 2) {
@@ -509,7 +671,7 @@ export default function SkeletonPage() {
 
   // 部分的な解析（制約を緩和）
   const solvePartial = (wordList: string[], slots: Slot[]): { grid: string[][], usedWords: Set<string> } | null => {
-    const grid: string[][] = Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill(""));
+    const grid: string[][] = Array.from({ length: boardHeight }, () => Array.from({ length: boardWidth }, () => ""));
     const usedWords = new Set<string>();
 
     // 交差点を事前計算
@@ -608,11 +770,23 @@ export default function SkeletonPage() {
     return lengthMap;
   }
 
+  const hasSameWordIntersectionConflict = (targetSlot: Slot, word: string, intersections: Intersection[]): boolean => {
+    return intersections.some((intersection) => {
+      if (intersection.horizontalSlots === targetSlot) {
+        return intersection.verticalSlots.confirmedWord === word;
+      }
+      if (intersection.verticalSlots === targetSlot) {
+        return intersection.horizontalSlots.confirmedWord === word;
+      }
+      return false;
+    });
+  };
+
 
   // 各スロットに確定した文字を探して入れていく
   const solveConstraints = (lengthMap: Map<number, string[]>, slots: Slot[], intersections: Intersection[]):
    { grid: string[][], usedWords: Set<string> } | null => {
-    const grid: string[][] = Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill(""));
+    const grid: string[][] = Array.from({ length: boardHeight }, () => Array.from({ length: boardWidth }, () => ""));
 
     // 各スロットに候補を設定
     for (const slot of slots) {
@@ -628,17 +802,23 @@ export default function SkeletonPage() {
     // 確定できる単語を順次配置していく（無限ループ）
     while (true) {
       const trashSlots : Slot[] = [];
+      let hasNewConfirmed = false;
       
       // 候補が1個しかないスロットを確定
       slots.forEach(slot => {
         if (slot.confirmedWord == null && slot.candidates.length === 1) {
+          const candidate = slot.candidates[0];
+          if (hasSameWordIntersectionConflict(slot, candidate, intersections)) {
+            return;
+          }
           if (trashSlots.includes(slot)) return;
-          slot.confirmedWord = slot.candidates[0];
+          slot.confirmedWord = candidate;
           trashSlots.push(slot);
+          hasNewConfirmed = true;
         }
       });
 
-      if (trashSlots.length === 0) {
+      if (!hasNewConfirmed) {
         break; // これ以上確定できる単語がない
       }
 
@@ -706,7 +886,7 @@ export default function SkeletonPage() {
           onClick={() => setShowManual(true)}
         >使い方</button>
       </div>
-      
+
       {showManual && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
           <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative">
@@ -772,12 +952,14 @@ export default function SkeletonPage() {
 
       <div className="mb-4">
         <h3 className="font-semibold mb-2">単語入力</h3>
-        <textarea
-          className="w-full h-32 p-2 border rounded"
-          value={words}
-          onChange={e => setWords(e.target.value)}
-          placeholder="単語を改行で区切って入力してください"
-        />
+        <div className="flex flex-wrap items-start gap-3">
+          <textarea
+            className="h-32 min-w-[320px] flex-1 p-2 border rounded"
+            value={words}
+            onChange={e => setWords(e.target.value)}
+            placeholder="単語を改行で区切って入力してください"
+          />
+        </div>
       </div>
 
       <div className="mb-4 flex gap-2">
@@ -797,6 +979,48 @@ export default function SkeletonPage() {
 
       <div className="mb-4">
         <h3 className="font-semibold mb-2">ボード（クリック・ドラッグで黄色/白を切り替え）</h3>
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
+          <label className="flex items-center gap-1">
+            <span className="font-medium">横</span>
+            <input
+              type="number"
+              min={10}
+              max={60}
+              value={boardWidthDraft}
+              onChange={(e) => setBoardWidthDraft(Number(e.target.value))}
+              className="w-20 rounded border px-2 py-1"
+            />
+          </label>
+          <label className="flex items-center gap-1">
+            <span className="font-medium">縦</span>
+            <input
+              type="number"
+              min={10}
+              max={60}
+              value={boardHeightDraft}
+              onChange={(e) => setBoardHeightDraft(Number(e.target.value))}
+              className="w-20 rounded border px-2 py-1"
+            />
+          </label>
+          <button
+            className="h-[30px] rounded bg-blue-600 px-3 text-white hover:bg-blue-700"
+            onClick={handleApplyBoardSize}
+          >
+            適用
+          </button>
+          <button
+            className="h-[30px] rounded bg-slate-600 px-3 text-white hover:bg-slate-700"
+            onClick={handleFitBoard}
+          >
+            ぴったり
+          </button>
+          <button
+            className="h-[30px] rounded bg-cyan-700 px-3 text-white hover:bg-cyan-800"
+            onClick={handleExpandBoard}
+          >
+            広げる
+          </button>
+        </div>
         <div 
           ref={boardRef}
           className="inline-block border-2 border-gray-400 select-none"
