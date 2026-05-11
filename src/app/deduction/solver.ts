@@ -66,7 +66,16 @@ type OrderCondition = {
   operator: "<" | ">" | "<=" | ">=";
 };
 
-type Condition = MembershipEqualityCondition | ComparableEqualityCondition | OrderCondition;
+type AtomicCondition = MembershipEqualityCondition | ComparableEqualityCondition | OrderCondition;
+
+type LogicCondition = {
+  type: "logic";
+  operator: "&" | "|" | "^" | "!^";
+  left: Condition;
+  right: Condition;
+};
+
+type Condition = AtomicCondition | LogicCondition;
 
 export interface ParsedPuzzle {
   categories: Category[];
@@ -91,7 +100,17 @@ interface RawConditionLine {
   text: string;
 }
 
-const IDENTIFIER_FORBIDDEN_PATTERN = /[.,\[\]\s]/;
+type ConditionToken =
+  | {
+      kind: "atom";
+      text: string;
+    }
+  | {
+      kind: "operator";
+      text: "&" | "|" | "^" | "!^";
+    };
+
+const IDENTIFIER_FORBIDDEN_PATTERN = /[.,\[\]()\s]/;
 
 const normalizeLine = (line: string): string => line.replace(/#.*$/, "").replace(/[ \t]/g, "").trim();
 
@@ -193,6 +212,258 @@ const tryResolveExplicitRefToken = (
   return { categoryIndex, valueIndex };
 };
 
+const tokenizeConditionExpression = (text: string, line: number): ConditionToken[] => {
+  const tokens: ConditionToken[] = [];
+  let current = "";
+  let depth = 0;
+
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+
+    if (char === "(") {
+      depth++;
+      current += char;
+      continue;
+    }
+
+    if (char === ")") {
+      depth--;
+      if (depth < 0) {
+        throw new Error(`L${line}: 括弧の対応が不正です: ${text}`);
+      }
+      current += char;
+      continue;
+    }
+
+    if (depth === 0 && char === "!" && text[index + 1] === "^") {
+      if (!current) {
+        throw new Error(`L${line}: 条件式の形式が不正です: ${text}`);
+      }
+      tokens.push({ kind: "atom", text: current });
+      tokens.push({ kind: "operator", text: "!^" });
+      current = "";
+      index++;
+      continue;
+    }
+
+    if (depth === 0 && (char === "&" || char === "|" || char === "^")) {
+      if (!current) {
+        throw new Error(`L${line}: 条件式の形式が不正です: ${text}`);
+      }
+      tokens.push({ kind: "atom", text: current });
+      tokens.push({ kind: "operator", text: char });
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current) {
+    tokens.push({ kind: "atom", text: current });
+  }
+
+  if (depth !== 0) {
+    throw new Error(`L${line}: 括弧の対応が不正です: ${text}`);
+  }
+
+  if (tokens.length === 0) {
+    throw new Error(`L${line}: 条件式が空です`);
+  }
+
+  if (tokens[0].kind === "operator" || tokens[tokens.length - 1].kind === "operator") {
+    throw new Error(`L${line}: 条件式の形式が不正です: ${text}`);
+  }
+
+  for (let index = 1; index < tokens.length; index += 2) {
+    const operator = tokens[index];
+    const right = tokens[index + 1];
+    if (!operator || operator.kind !== "operator" || !right || right.kind !== "atom") {
+      throw new Error(`L${line}: 条件式の形式が不正です: ${text}`);
+    }
+  }
+
+  return tokens;
+};
+
+const unwrapGroupedCondition = (text: string, line: number): string | null => {
+  if (text.length < 2 || text[0] !== "(" || text[text.length - 1] !== ")") {
+    return null;
+  }
+
+  let depth = 0;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    if (char === "(") {
+      depth++;
+    } else if (char === ")") {
+      depth--;
+      if (depth < 0) {
+        throw new Error(`L${line}: 括弧の対応が不正です: ${text}`);
+      }
+      if (depth === 0 && index !== text.length - 1) {
+        return null;
+      }
+    }
+  }
+
+  if (depth !== 0) {
+    throw new Error(`L${line}: 括弧の対応が不正です: ${text}`);
+  }
+
+  return text.slice(1, -1);
+};
+
+const parseAtomicCondition = (
+  text: string,
+  line: number,
+  categories: Category[],
+  categoryIndexByName: Map<string, number>,
+  valueIndexByCategory: Array<Map<string, number>>,
+  valueHits: Map<string, number[]>
+): AtomicCondition => {
+  const orderOperator = ["<=", ">=", "<", ">"].find((op) => text.includes(op));
+  if (orderOperator) {
+    const parts = text.split(orderOperator);
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      throw new Error(`L${line}: 不等号条件の形式が不正です: ${text}`);
+    }
+
+    return {
+      type: "order",
+      left: parseArithmeticExpression(parts[0], line, categories, categoryIndexByName, valueIndexByCategory, valueHits),
+      right: parseArithmeticExpression(parts[1], line, categories, categoryIndexByName, valueIndexByCategory, valueHits),
+      operator: orderOperator,
+    } as OrderCondition;
+  }
+
+  const equalityOperator = text.includes("!=") ? "!=" : text.includes("=") ? "=" : null;
+  if (!equalityOperator) {
+    throw new Error(`L${line}: 条件式の演算子が不正です: ${text}`);
+  }
+
+  const parts = text.split(equalityOperator);
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new Error(`L${line}: 等号条件の形式が不正です: ${text}`);
+  }
+
+  const rightTokens = parts[1].split(",");
+  if (rightTokens.some((token) => token.length === 0)) {
+    throw new Error(`L${line}: 右辺リストの形式が不正です: ${parts[1]}`);
+  }
+
+  const hasArithmeticSyntax = /[()+\-*/]/.test(parts[0]) || rightTokens.some((token) => /[()+\-*/]/.test(token));
+
+  if (!hasArithmeticSyntax) {
+    const leftOperand = parseEqualityOperand(parts[0], line, categories, categoryIndexByName, valueIndexByCategory, valueHits);
+    const rightOperands = rightTokens.map((token) =>
+      parseEqualityOperand(token, line, categories, categoryIndexByName, valueIndexByCategory, valueHits)
+    );
+
+    if (rightOperands.length >= 2 && rightOperands.every((operand) => operand.kind === "ref")) {
+      const rightCategory = rightOperands[0].ref.categoryIndex;
+      const mixedCategory = rightOperands.some((operand) => operand.ref.categoryIndex !== rightCategory);
+      if (mixedCategory) {
+        throw new Error(`L${line}: 右辺リストの値は同一カテゴリで指定してください`);
+      }
+    }
+
+    const hasProjectedOperand = leftOperand.kind === "projected" || rightOperands.some((operand) => operand.kind === "projected");
+
+    if (!hasProjectedOperand) {
+      if (leftOperand.kind !== "ref") {
+        throw new Error(`L${line}: 等号条件の左辺の形式が不正です`);
+      }
+
+      return {
+        type: "eq-membership",
+        left: leftOperand.ref,
+        right: rightOperands.map((operand) => {
+          if (operand.kind !== "ref") {
+            throw new Error(`L${line}: 同一セット比較では射影構文を使用できません`);
+          }
+          return operand.ref;
+        }),
+        operator: equalityOperator,
+      } as MembershipEqualityCondition;
+    }
+  }
+
+  return {
+    type: "eq-compare",
+    left: parseArithmeticExpression(parts[0], line, categories, categoryIndexByName, valueIndexByCategory, valueHits),
+    right: rightTokens.map((token) =>
+      parseArithmeticExpression(token, line, categories, categoryIndexByName, valueIndexByCategory, valueHits)
+    ),
+    operator: equalityOperator,
+  } as ComparableEqualityCondition;
+};
+
+const parseConditionExpression = (
+  text: string,
+  line: number,
+  categories: Category[],
+  categoryIndexByName: Map<string, number>,
+  valueIndexByCategory: Array<Map<string, number>>,
+  valueHits: Map<string, number[]>
+): Condition => {
+  const tokens = tokenizeConditionExpression(text, line);
+  let position = 0;
+
+  const peek = () => tokens[position];
+  const consume = () => tokens[position++];
+
+  const parseAtom = (): Condition => {
+    const token = consume();
+    if (!token || token.kind !== "atom") {
+      throw new Error(`L${line}: 条件式の形式が不正です: ${text}`);
+    }
+
+    const groupedText = unwrapGroupedCondition(token.text, line);
+    if (groupedText !== null) {
+      if (!groupedText) {
+        throw new Error(`L${line}: 条件式の形式が不正です: ${text}`);
+      }
+      return parseConditionExpression(groupedText, line, categories, categoryIndexByName, valueIndexByCategory, valueHits);
+    }
+
+    return parseAtomicCondition(token.text, line, categories, categoryIndexByName, valueIndexByCategory, valueHits);
+  };
+
+  const parseAnd = (): Condition => {
+    let expr = parseAtom();
+    while (peek()?.kind === "operator" && peek().text === "&") {
+      consume();
+      expr = { type: "logic", operator: "&", left: expr, right: parseAtom() };
+    }
+    return expr;
+  };
+
+  const parseXor = (): Condition => {
+    let expr = parseAnd();
+    while (peek()?.kind === "operator" && (peek().text === "^" || peek().text === "!^")) {
+      const operator = consume().text as "^" | "!^";
+      expr = { type: "logic", operator, left: expr, right: parseAnd() };
+    }
+    return expr;
+  };
+
+  const parseOr = (): Condition => {
+    let expr = parseXor();
+    while (peek()?.kind === "operator" && peek().text === "|") {
+      consume();
+      expr = { type: "logic", operator: "|", left: expr, right: parseXor() };
+    }
+    return expr;
+  };
+
+  const condition = parseOr();
+  if (position !== tokens.length) {
+    throw new Error(`L${line}: 条件式の形式が不正です: ${text}`);
+  }
+  return condition;
+};
+
 const parseEqualityOperand = (
   token: string,
   line: number,
@@ -268,10 +539,20 @@ const parseArithmeticExpression = (
       return { type: "unary", operator: char, operand: parsePrimary() };
     }
 
+    if (char === "(") {
+      consume();
+      const expr = parseAdditive();
+      if (peek() !== ")") {
+        throw new Error(`L${line}: 算術式の括弧の対応が不正です: ${text}`);
+      }
+      consume();
+      return expr;
+    }
+
     let token = "";
     while (index < text.length) {
       const current = peek();
-      if (current === "+" || current === "-" || current === "*" || current === "/") {
+      if (current === "+" || current === "-" || current === "*" || current === "/" || current === ")") {
         break;
       }
       token += consume();
@@ -399,83 +680,9 @@ export const parsePuzzle = (input: string): ParsedPuzzle => {
 
   const valueHits = buildValueHitMap(categories);
 
-  const conditions: Condition[] = rawConditions.map(({ line, text }) => {
-    const orderOperator = ["<=", ">=", "<", ">"].find((op) => text.includes(op));
-    if (orderOperator) {
-      const parts = text.split(orderOperator);
-      if (parts.length !== 2 || !parts[0] || !parts[1]) {
-        throw new Error(`L${line}: 不等号条件の形式が不正です: ${text}`);
-      }
-
-      return {
-        type: "order",
-        left: parseArithmeticExpression(parts[0], line, categories, categoryIndexByName, valueIndexByCategory, valueHits),
-        right: parseArithmeticExpression(parts[1], line, categories, categoryIndexByName, valueIndexByCategory, valueHits),
-        operator: orderOperator,
-      } as OrderCondition;
-    }
-
-    const equalityOperator = text.includes("!=") ? "!=" : text.includes("=") ? "=" : null;
-    if (!equalityOperator) {
-      throw new Error(`L${line}: 条件式の演算子が不正です: ${text}`);
-    }
-
-    const parts = text.split(equalityOperator);
-    if (parts.length !== 2 || !parts[0] || !parts[1]) {
-      throw new Error(`L${line}: 等号条件の形式が不正です: ${text}`);
-    }
-
-    const rightTokens = parts[1].split(",");
-    if (rightTokens.some((token) => token.length === 0)) {
-      throw new Error(`L${line}: 右辺リストの形式が不正です: ${parts[1]}`);
-    }
-
-    const hasArithmeticSyntax = /[+\-*/]/.test(parts[0]) || rightTokens.some((token) => /[+\-*/]/.test(token));
-
-    if (!hasArithmeticSyntax) {
-      const leftOperand = parseEqualityOperand(parts[0], line, categories, categoryIndexByName, valueIndexByCategory, valueHits);
-      const rightOperands = rightTokens.map((token) =>
-        parseEqualityOperand(token, line, categories, categoryIndexByName, valueIndexByCategory, valueHits)
-      );
-
-      if (rightOperands.length >= 2 && rightOperands.every((operand) => operand.kind === "ref")) {
-        const rightCategory = rightOperands[0].ref.categoryIndex;
-        const mixedCategory = rightOperands.some((operand) => operand.ref.categoryIndex !== rightCategory);
-        if (mixedCategory) {
-          throw new Error(`L${line}: 右辺リストの値は同一カテゴリで指定してください`);
-        }
-      }
-
-      const hasProjectedOperand = leftOperand.kind === "projected" || rightOperands.some((operand) => operand.kind === "projected");
-
-      if (!hasProjectedOperand) {
-        if (leftOperand.kind !== "ref") {
-          throw new Error(`L${line}: 等号条件の左辺の形式が不正です`);
-        }
-
-        return {
-          type: "eq-membership",
-          left: leftOperand.ref,
-          right: rightOperands.map((operand) => {
-            if (operand.kind !== "ref") {
-              throw new Error(`L${line}: 同一セット比較では射影構文を使用できません`);
-            }
-            return operand.ref;
-          }),
-          operator: equalityOperator,
-        } as MembershipEqualityCondition;
-      }
-    }
-
-    return {
-      type: "eq-compare",
-      left: parseArithmeticExpression(parts[0], line, categories, categoryIndexByName, valueIndexByCategory, valueHits),
-      right: rightTokens.map((token) =>
-        parseArithmeticExpression(token, line, categories, categoryIndexByName, valueIndexByCategory, valueHits)
-      ),
-      operator: equalityOperator,
-    } as ComparableEqualityCondition;
-  });
+  const conditions: Condition[] = rawConditions.map(({ line, text }) =>
+    parseConditionExpression(text, line, categories, categoryIndexByName, valueIndexByCategory, valueHits)
+  );
 
   return { categories, conditions, warnings };
 };
@@ -560,6 +767,48 @@ const evaluateCondition = (
     if (expression.operator === "*") return leftValue * rightValue;
     return leftValue / rightValue;
   };
+
+  if (condition.type === "logic") {
+    const leftValue = evaluateCondition(condition.left, assigned, permutationByCategory, inverseByCategory, categories);
+
+    if (condition.operator === "&") {
+      if (leftValue === false) {
+        return false;
+      }
+
+      const rightValue = evaluateCondition(condition.right, assigned, permutationByCategory, inverseByCategory, categories);
+      if (leftValue === true) {
+        return rightValue;
+      }
+      if (rightValue === false) {
+        return false;
+      }
+      return null;
+    }
+
+    if (condition.operator === "|") {
+      if (leftValue === true) {
+        return true;
+      }
+
+      const rightValue = evaluateCondition(condition.right, assigned, permutationByCategory, inverseByCategory, categories);
+      if (leftValue === false) {
+        return rightValue;
+      }
+      if (rightValue === true) {
+        return true;
+      }
+      return null;
+    }
+
+    const rightValue = evaluateCondition(condition.right, assigned, permutationByCategory, inverseByCategory, categories);
+    if (leftValue === null || rightValue === null) {
+      return null;
+    }
+
+    const isEqual = leftValue === rightValue;
+    return condition.operator === "^" ? !isEqual : isEqual;
+  }
 
   if (condition.type === "eq-membership") {
     const leftEntity = getEntityOfRef(condition.left);

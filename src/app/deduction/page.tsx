@@ -177,7 +177,22 @@ export default function DeductionPage() {
             </section>
 
             <section className="space-y-2">
-              <h3 className="font-semibold">4. 不等号条件と算術式</h3>
+              <h3 className="font-semibold">4. 論理演算子</h3>
+              <pre className="bg-gray-50 border rounded p-3 text-xs overflow-x-auto">
+{`性別{男,女}
+A=赤|B=赤&A=青
+A=赤^A=赤
+A=赤!^A=赤`}
+              </pre>
+              <ul className="list-disc pl-5 text-sm space-y-1">
+                <li>論理演算子は &amp;, |, ^, !^ が使えます。</li>
+                <li>優先順位は &amp; &gt; ^ / !^ &gt; | です。</li>
+                <li>同じ優先順位の演算子は左結合です。</li>
+              </ul>
+            </section>
+
+            <section className="space-y-2">
+              <h3 className="font-semibold">5. 不等号条件と算術式</h3>
               <pre className="bg-gray-50 border rounded p-3 text-xs overflow-x-auto">
 {`一郎.値段<次郎
 一郎.値段<=900
@@ -191,7 +206,7 @@ export default function DeductionPage() {
             </section>
 
             <section className="space-y-2">
-              <h3 className="font-semibold">5. 最小サンプル</h3>
+              <h3 className="font-semibold">6. 最小サンプル</h3>
               <pre className="bg-gray-50 border rounded p-3 text-xs overflow-x-auto">
 {`名前[一郎,次郎,花子]
 食べ物[カツ丼,ハンバーグ,カレー]

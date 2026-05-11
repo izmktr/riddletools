@@ -176,4 +176,71 @@ describe("deduction solver", () => {
       ["B", "200", "3"],
     ]);
   });
+
+  test("論理演算子 AND/OR/XOR/NXOR を解釈できる", () => {
+    const input = [
+      "名前[A,B]",
+      "色[赤,青]",
+      "A=赤|B=赤&A=青",
+    ].join("\n");
+
+    const result = solvePuzzle(input);
+    expect(result.solutions).toHaveLength(2);
+    expect(result.solutions).toContainEqual([
+      ["A", "赤"],
+      ["B", "青"],
+    ]);
+    expect(result.solutions).toContainEqual([
+      ["A", "青"],
+      ["B", "赤"],
+    ]);
+  });
+
+  test("XOR と NXOR の意味が異なる", () => {
+    const xorInput = [
+      "名前[A,B]",
+      "色[赤,青]",
+      "A=赤^A=赤",
+    ].join("\n");
+
+    const xorResult = solvePuzzle(xorInput);
+    expect(xorResult.solutions).toHaveLength(0);
+
+    const nxorInput = [
+      "名前[A,B]",
+      "色[赤,青]",
+      "A=赤!^A=赤",
+    ].join("\n");
+
+    const nxorResult = solvePuzzle(nxorInput);
+    expect(nxorResult.solutions).toHaveLength(2);
+  });
+
+  test("条件式で括弧を使って優先順位を上げられる", () => {
+    const input = [
+      "名前[A,B]",
+      "色[赤,青]",
+      "(A=赤|B=赤)&A=青",
+    ].join("\n");
+
+    const result = solvePuzzle(input);
+    expect(result.solutions).toHaveLength(1);
+    expect(result.solutions[0]).toEqual([
+      ["A", "青"],
+      ["B", "赤"],
+    ]);
+  });
+
+  test("算術式で括弧を使って優先順位を上げられる", () => {
+    const input = [
+      "名前[A,B]",
+      "値[2,3]",
+      "A=2",
+      "B=3",
+      "A.値=(B.値+1)/2",
+    ].join("\n");
+
+    const result = solvePuzzle(input);
+    expect(result.solutions).toHaveLength(1);
+  });
 });
