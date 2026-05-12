@@ -11,8 +11,8 @@ describe("deduction solver", () => {
       "次郎=ハンバーグ",
       "花子=1000",
       "カツ丼=800",
-      "一郎.順位<次郎",
-      "次郎.順位<花子",
+      "一郎.順位<次郎.順位",
+      "次郎.順位<花子.順位",
     ].join("\n");
 
     const result = solvePuzzle(input);
@@ -35,7 +35,7 @@ describe("deduction solver", () => {
       "次郎=ハンバーグ",
       "花子=1000",
       "カツ丼=800",
-      "一郎.順位<カレー",
+      "一郎.順位<カレー.順位",
       "次郎.順位=2",
     ].join("\n");
 
@@ -133,7 +133,7 @@ describe("deduction solver", () => {
       "項目[800,900,未定]",
       "A=800",
       "B=未定",
-      "A.項目>B",
+      "A.項目>B.項目",
     ].join("\n");
 
     const result = solvePuzzle(input);
@@ -177,6 +177,26 @@ describe("deduction solver", () => {
     ]);
   });
 
+  test("不等号条件で左右のカテゴリが異なる場合はエラー", () => {
+    const input = [
+      "名前[一郎,次郎,花子]",
+      "順位[]",
+      "一郎.順位<次郎",
+    ].join("\n");
+
+    expect(() => solvePuzzle(input)).toThrow("不等号条件の左右は同一カテゴリ（または同一タグ）である必要があります");
+  });
+
+  test("不等号条件で四則演算が含まれる場合はカテゴリ不一致でもエラーにしない", () => {
+    const input = [
+      "名前[一郎,次郎,花子]",
+      "順位[]",
+      "一郎.順位<次郎+0",
+    ].join("\n");
+
+    expect(() => solvePuzzle(input)).not.toThrow();
+  });
+
   test("論理演算子 AND/OR/XOR/NXOR を解釈できる", () => {
     const input = [
       "名前[A,B]",
@@ -209,7 +229,7 @@ describe("deduction solver", () => {
     const nxorInput = [
       "名前[A,B]",
       "色[赤,青]",
-      "A=赤!^A=赤",
+      "A=赤:A=赤",
     ].join("\n");
 
     const nxorResult = solvePuzzle(nxorInput);
@@ -242,5 +262,109 @@ describe("deduction solver", () => {
 
     const result = solvePuzzle(input);
     expect(result.solutions).toHaveLength(1);
+  });
+
+  test("タグの値を省略すると{true,false}として補完される", () => {
+    const input = [
+      "人物[A,B,C]",
+      "真{}",
+      "A=真",
+      "B=真",
+      "C!=真",
+    ].join("\n");
+
+    const result = solvePuzzle(input);
+    // タグは複数セットで同じ値を持てるため、複数の解が存在する
+    expect(result.solutions.length).toBeGreaterThan(0);
+
+    for (const solution of result.solutions) {
+      // A と B は真=true、C は真=false
+      const aTrueValue = solution[0][1]; // A のタグ値
+      const bTrueValue = solution[1][1]; // B のタグ値
+      const cTrueValue = solution[2][1]; // C のタグ値
+
+      // A=真 and B=真 => A と B は真.true
+      expect(aTrueValue).toBe("true");
+      expect(bTrueValue).toBe("true");
+      // C!=真 => C は真.false
+      expect(cTrueValue).toBe("false");
+    }
+  });
+
+  test("タグの長さ制約により値を制限できる（test1）", () => {
+    const input = [
+      "人物[A,B,C]",
+      "真{}",
+      "真.len=2",
+      "A=真",
+      "B!=真",
+    ].join("\n");
+
+    const result = solvePuzzle(input);
+    expect(result.solutions.length).toBeGreaterThan(0);
+
+    for (const solution of result.solutions) {
+      const aTrueValue = solution[0][1]; // A のタグ値
+      const bTrueValue = solution[1][1]; // B のタグ値
+      const cTrueValue = solution[2][1]; // C のタグ値
+
+      // A=真, B!=真 の制約と、真.len=2（true が2つ）
+      expect(aTrueValue).toBe("true");
+      expect(bTrueValue).toBe("false");
+      expect(cTrueValue).toBe("true");
+    }
+  });
+
+  test("タグの長さ制約と NXOR 演算子（test2）", () => {
+    const input = [
+      "人物[A,B,C]",
+      "真{}",
+      "真.len=2",
+      "A=真:C!=真",
+      "B=真:A=真",
+      "C=真:B!=真",
+    ].join("\n");
+
+    const result = solvePuzzle(input);
+    expect(result.solutions.length).toBeGreaterThan(0);
+
+    for (const solution of result.solutions) {
+      const aTrueValue = solution[0][1]; // A のタグ値
+      const bTrueValue = solution[1][1]; // B のタグ値
+      const cTrueValue = solution[2][1]; // C のタグ値
+
+      // 真.len=2（true が2つ）で、NXOR 条件を満たす
+      expect(aTrueValue).toBe("true");
+      expect(bTrueValue).toBe("true");
+      expect(cTrueValue).toBe("false");
+    }
+  });
+
+  test("全称構文と推論演算子（IMP）を解釈できる", () => {
+    const input = [
+      "人物[A,B,C]",
+      "真{}",
+      "犯人{}",
+      "真.len>=1",
+      "犯人.len=1",
+      "犯人->!真",
+      "A=真:B=犯人",
+      "B=真:A!=犯人",
+      "C=真:B=犯人",
+    ].join("\n");
+
+    const result = solvePuzzle(input);
+
+    expect(result.solutions.length).toBeGreaterThan(0);
+    for (const solution of result.solutions) {
+      // solution[i] = [エンティティ名, 真の値, 犯人の値]
+      const byEntity = Object.fromEntries(solution.map((row) => [row[0], row]));
+      expect(byEntity["A"][1]).toBe("false");  // 真
+      expect(byEntity["A"][2]).toBe("false");  // 犯人
+      expect(byEntity["B"][1]).toBe("true");   // 真
+      expect(byEntity["B"][2]).toBe("false");  // 犯人
+      expect(byEntity["C"][1]).toBe("false");  // 真
+      expect(byEntity["C"][2]).toBe("true");   // 犯人
+    }
   });
 });

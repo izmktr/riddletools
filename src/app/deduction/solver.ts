@@ -3,6 +3,11 @@ export interface Category {
   values: string[];
 }
 
+export interface Tag {
+  name: string;
+  values: string[];
+}
+
 export interface ResolvedRef {
   categoryIndex: number;
   valueIndex: number;
@@ -57,6 +62,11 @@ type ArithmeticExpression =
       operator: "+" | "-" | "*" | "/";
       left: ArithmeticExpression;
       right: ArithmeticExpression;
+    }
+  | {
+      type: "tag-len";
+      tagIndex: number;
+      valueIndex: number; // カウント対象の値インデックス
     };
 
 type OrderCondition = {
@@ -70,7 +80,7 @@ type AtomicCondition = MembershipEqualityCondition | ComparableEqualityCondition
 
 type LogicCondition = {
   type: "logic";
-  operator: "&" | "|" | "^" | "!^";
+  operator: "&" | "|" | "^" | ":" | "->";
   left: Condition;
   right: Condition;
 };
@@ -79,6 +89,8 @@ type Condition = AtomicCondition | LogicCondition;
 
 export interface ParsedPuzzle {
   categories: Category[];
+  realCategoryCount: number;
+  tags: Tag[];
   conditions: Condition[];
   warnings: ParseWarning[];
 }
@@ -107,7 +119,7 @@ type ConditionToken =
     }
   | {
       kind: "operator";
-      text: "&" | "|" | "^" | "!^";
+      text: "&" | "|" | "^" | ":" | "->";
     };
 
 const IDENTIFIER_FORBIDDEN_PATTERN = /[.,\[\]()\s]/;
@@ -235,14 +247,24 @@ const tokenizeConditionExpression = (text: string, line: number): ConditionToken
       continue;
     }
 
-    if (depth === 0 && char === "!" && text[index + 1] === "^") {
+    if (depth === 0 && char === "-" && text[index + 1] === ">") {
       if (!current) {
         throw new Error(`L${line}: 条件式の形式が不正です: ${text}`);
       }
       tokens.push({ kind: "atom", text: current });
-      tokens.push({ kind: "operator", text: "!^" });
+      tokens.push({ kind: "operator", text: "->" });
       current = "";
-      index++;
+      index++; // '>' をスキップ
+      continue;
+    }
+
+    if (depth === 0 && char === ":") {
+      if (!current) {
+        throw new Error(`L${line}: 条件式の形式が不正です: ${text}`);
+      }
+      tokens.push({ kind: "atom", text: current });
+      tokens.push({ kind: "operator", text: ":" });
+      current = "";
       continue;
     }
 
@@ -314,13 +336,26 @@ const unwrapGroupedCondition = (text: string, line: number): string | null => {
   return text.slice(1, -1);
 };
 
+const inferComparableCategoryIndex = (expression: ArithmeticExpression): number | null => {
+  if (expression.type === "operand") {
+    if (expression.operand.kind === "projected") {
+      return expression.operand.compareCategoryIndex;
+    }
+    return expression.operand.ref.categoryIndex;
+  }
+
+  // 四則演算や数値リテラル等は any 扱い（カテゴリ整合チェック対象外）
+  return null;
+};
+
 const parseAtomicCondition = (
   text: string,
   line: number,
   categories: Category[],
   categoryIndexByName: Map<string, number>,
   valueIndexByCategory: Array<Map<string, number>>,
-  valueHits: Map<string, number[]>
+  valueHits: Map<string, number[]>,
+  tagIndexByName: Map<string, number> = new Map()
 ): AtomicCondition => {
   const orderOperator = ["<=", ">=", "<", ">"].find((op) => text.includes(op));
   if (orderOperator) {
@@ -329,10 +364,39 @@ const parseAtomicCondition = (
       throw new Error(`L${line}: 不等号条件の形式が不正です: ${text}`);
     }
 
+    const leftExpression = parseArithmeticExpression(
+      parts[0],
+      line,
+      categories,
+      categoryIndexByName,
+      valueIndexByCategory,
+      valueHits,
+      tagIndexByName
+    );
+    const rightExpression = parseArithmeticExpression(
+      parts[1],
+      line,
+      categories,
+      categoryIndexByName,
+      valueIndexByCategory,
+      valueHits,
+      tagIndexByName
+    );
+
+    const leftCategoryIndex = inferComparableCategoryIndex(leftExpression);
+    const rightCategoryIndex = inferComparableCategoryIndex(rightExpression);
+    if (
+      leftCategoryIndex !== null &&
+      rightCategoryIndex !== null &&
+      leftCategoryIndex !== rightCategoryIndex
+    ) {
+      throw new Error(`L${line}: 不等号条件の左右は同一カテゴリ（または同一タグ）である必要があります`);
+    }
+
     return {
       type: "order",
-      left: parseArithmeticExpression(parts[0], line, categories, categoryIndexByName, valueIndexByCategory, valueHits),
-      right: parseArithmeticExpression(parts[1], line, categories, categoryIndexByName, valueIndexByCategory, valueHits),
+      left: leftExpression,
+      right: rightExpression,
       operator: orderOperator,
     } as OrderCondition;
   }
@@ -352,7 +416,11 @@ const parseAtomicCondition = (
     throw new Error(`L${line}: 右辺リストの形式が不正です: ${parts[1]}`);
   }
 
-  const hasArithmeticSyntax = /[()+\-*/]/.test(parts[0]) || rightTokens.some((token) => /[()+\-*/]/.test(token));
+  const hasArithmeticSyntax =
+    /[()+\-*/]/.test(parts[0]) ||
+    rightTokens.some((token) => /[()+\-*/]/.test(token)) ||
+    parts[0].endsWith(".len") ||
+    rightTokens.some((token) => token.endsWith(".len"));
 
   if (!hasArithmeticSyntax) {
     const leftOperand = parseEqualityOperand(parts[0], line, categories, categoryIndexByName, valueIndexByCategory, valueHits);
@@ -391,9 +459,9 @@ const parseAtomicCondition = (
 
   return {
     type: "eq-compare",
-    left: parseArithmeticExpression(parts[0], line, categories, categoryIndexByName, valueIndexByCategory, valueHits),
+    left: parseArithmeticExpression(parts[0], line, categories, categoryIndexByName, valueIndexByCategory, valueHits, tagIndexByName),
     right: rightTokens.map((token) =>
-      parseArithmeticExpression(token, line, categories, categoryIndexByName, valueIndexByCategory, valueHits)
+      parseArithmeticExpression(token, line, categories, categoryIndexByName, valueIndexByCategory, valueHits, tagIndexByName)
     ),
     operator: equalityOperator,
   } as ComparableEqualityCondition;
@@ -405,7 +473,8 @@ const parseConditionExpression = (
   categories: Category[],
   categoryIndexByName: Map<string, number>,
   valueIndexByCategory: Array<Map<string, number>>,
-  valueHits: Map<string, number[]>
+  valueHits: Map<string, number[]>,
+  tagIndexByName: Map<string, number> = new Map()
 ): Condition => {
   const tokens = tokenizeConditionExpression(text, line);
   let position = 0;
@@ -424,10 +493,10 @@ const parseConditionExpression = (
       if (!groupedText) {
         throw new Error(`L${line}: 条件式の形式が不正です: ${text}`);
       }
-      return parseConditionExpression(groupedText, line, categories, categoryIndexByName, valueIndexByCategory, valueHits);
+      return parseConditionExpression(groupedText, line, categories, categoryIndexByName, valueIndexByCategory, valueHits, tagIndexByName);
     }
 
-    return parseAtomicCondition(token.text, line, categories, categoryIndexByName, valueIndexByCategory, valueHits);
+    return parseAtomicCondition(token.text, line, categories, categoryIndexByName, valueIndexByCategory, valueHits, tagIndexByName);
   };
 
   const parseAnd = (): Condition => {
@@ -441,8 +510,8 @@ const parseConditionExpression = (
 
   const parseXor = (): Condition => {
     let expr = parseAnd();
-    while (peek()?.kind === "operator" && (peek().text === "^" || peek().text === "!^")) {
-      const operator = consume().text as "^" | "!^";
+    while (peek()?.kind === "operator" && (peek().text === "^" || peek().text === ":" || peek().text === "->")) {
+      const operator = consume().text as "^" | ":" | "->";
       expr = { type: "logic", operator, left: expr, right: parseAnd() };
     }
     return expr;
@@ -521,7 +590,8 @@ const parseArithmeticExpression = (
   categories: Category[],
   categoryIndexByName: Map<string, number>,
   valueIndexByCategory: Array<Map<string, number>>,
-  valueHits: Map<string, number[]>
+  valueHits: Map<string, number[]>,
+  tagIndexByName: Map<string, number> = new Map()
 ): ArithmeticExpression => {
   let index = 0;
 
@@ -567,6 +637,29 @@ const parseArithmeticExpression = (
       return { type: "number", value: numeric };
     }
 
+    // タグの長さ制約 "タグ名.len" または "タグ名.値名.len" をチェック
+    if (token.endsWith(".len")) {
+      const withoutLen = token.slice(0, -4); // ".len" を除去
+      // "タグ名.値名" の形式かチェック
+      const dotIdx = withoutLen.lastIndexOf(".");
+      if (dotIdx > 0) {
+        const possibleTag = withoutLen.slice(0, dotIdx);
+        const possibleValue = withoutLen.slice(dotIdx + 1);
+        const tagIdx = tagIndexByName.get(possibleTag);
+        if (tagIdx !== undefined) {
+          const valIdx = valueIndexByCategory[tagIdx]?.get(possibleValue);
+          if (valIdx !== undefined) {
+            return { type: "tag-len", tagIndex: tagIdx, valueIndex: valIdx };
+          }
+        }
+      }
+      // "タグ名" のみの形式（値1=インデックス0を対象）
+      const tagIndex = tagIndexByName.get(withoutLen);
+      if (tagIndex !== undefined) {
+        return { type: "tag-len", tagIndex, valueIndex: 0 };
+      }
+    }
+
     return {
       type: "operand",
       operand: parseEqualityOperand(token, line, categories, categoryIndexByName, valueIndexByCategory, valueHits),
@@ -601,6 +694,7 @@ const parseArithmeticExpression = (
 export const parsePuzzle = (input: string): ParsedPuzzle => {
   const lines = input.split(/\r?\n/);
   const rawCategories: Array<{ line: number; name: string; values: string[] }> = [];
+  const rawTags: Array<{ line: number; name: string; values: string[] }> = [];
   const rawConditions: RawConditionLine[] = [];
 
   lines.forEach((rawLine, index) => {
@@ -610,7 +704,7 @@ export const parsePuzzle = (input: string): ParsedPuzzle => {
       return;
     }
 
-    const categoryMatch = text.match(/^([^\[\],.]+)\[(.*)\]$/);
+    const categoryMatch = text.match(/^([^\[\]{},.]+)\[(.*)\]$/);
     if (categoryMatch) {
       const categoryName = categoryMatch[1];
       const valuesText = categoryMatch[2];
@@ -621,6 +715,20 @@ export const parsePuzzle = (input: string): ParsedPuzzle => {
       values.forEach((value) => assertIdentifier("値名", value, line));
 
       rawCategories.push({ line, name: categoryName, values });
+      return;
+    }
+
+    const tagMatch = text.match(/^([^\[\]{},.]+)\{(.*)\}$/);
+    if (tagMatch) {
+      const tagName = tagMatch[1];
+      const valuesText = tagMatch[2];
+
+      assertIdentifier("タグ名", tagName, line);
+
+      const values = valuesText === "" ? [] : valuesText.split(",");
+      values.forEach((value) => assertIdentifier("値名", value, line));
+
+      rawTags.push({ line, name: tagName, values });
       return;
     }
 
@@ -638,6 +746,11 @@ export const parsePuzzle = (input: string): ParsedPuzzle => {
 
   const categoryIndexByName = new Map<string, number>();
   const categories: Category[] = [];
+  const valueIndexByCategory = categories.map((category) => {
+    const map = new Map<string, number>();
+    category.values.forEach((value, i) => map.set(value, i));
+    return map;
+  });
   const warnings: ParseWarning[] = [];
 
   rawCategories.forEach((rawCategory, idx) => {
@@ -670,21 +783,138 @@ export const parsePuzzle = (input: string): ParsedPuzzle => {
 
     categoryIndexByName.set(rawCategory.name, idx);
     categories.push({ name: rawCategory.name, values });
+
+    const map = new Map<string, number>();
+    values.forEach((value, i) => map.set(value, i));
+    valueIndexByCategory.push(map);
   });
 
-  const valueIndexByCategory = categories.map((category) => {
-    const map = new Map<string, number>();
-    category.values.forEach((value, i) => map.set(value, i));
-    return map;
+  const tagIndexByName = new Map<string, number>();
+  const tags: Tag[] = [];
+
+  rawTags.forEach((rawTag, idx) => {
+    if (tagIndexByName.has(rawTag.name)) {
+      throw new Error(`L${rawTag.line}: タグ名が重複しています: ${rawTag.name}`);
+    }
+
+    let values = [...rawTag.values];
+    if (values.length === 0) {
+      values = ["true", "false"];
+    }
+
+    if (values.length < 2) {
+      throw new Error(`L${rawTag.line}: タグ${rawTag.name}の値数は2個以上である必要があります`);
+    }
+
+    const uniqueCheck = new Set(values);
+    if (uniqueCheck.size !== values.length) {
+      throw new Error(`L${rawTag.line}: タグ${rawTag.name}内で値名が重複しています`);
+    }
+
+    tags.push({ name: rawTag.name, values });
+  });
+
+  // タグをカテゴリとして統合（参照解決用のみ、セット割り当ては除外）
+  const realCategoryCount = categories.length;
+  rawTags.forEach((rawTag, idx) => {
+    if (!categoryIndexByName.has(rawTag.name)) {
+      categoryIndexByName.set(rawTag.name, categories.length);
+      categories.push({ name: rawTag.name, values: tags[idx].values });
+
+      const map = new Map<string, number>();
+      tags[idx].values.forEach((value, i) => map.set(value, i));
+      valueIndexByCategory.push(map);
+    }
+
+    const tagCategoryIndex = categoryIndexByName.get(rawTag.name);
+    if (tagCategoryIndex !== undefined) {
+      tagIndexByName.set(rawTag.name, tagCategoryIndex);
+    }
   });
 
   const valueHits = buildValueHitMap(categories);
 
-  const conditions: Condition[] = rawConditions.map(({ line, text }) =>
-    parseConditionExpression(text, line, categories, categoryIndexByName, valueIndexByCategory, valueHits)
-  );
+  // 全称構文の展開: タグ名のみ（または !タグ名 を含む）の行を全エンティティ分に展開
+  // 例: "犯人 -> !真" → ["A=犯人 -> A!=真", "B=犯人 -> B!=真", ...]
+  const tagNameSet = new Set(tags.map((t) => t.name));
+  const firstCategoryEntities = rawCategories[0].values;
 
-  return { categories, conditions, warnings };
+  const expandedRawConditions: RawConditionLine[] = [];
+  for (const rawCond of rawConditions) {
+    // 全称構文の判定: 条件テキストにエンティティ名が含まれず、タグ名のみで構成されている
+    // タグ名だけを使った式かどうかを確認するため、トークンを抽出
+    // "タグ名" または "!タグ名" のみで構成されていれば全称展開対象
+    const textNoSpace = rawCond.text.replace(/\s/g, "");
+
+    // 全エンティティ名を取得して、それが含まれていないかチェック
+    const entityNames = firstCategoryEntities;
+    const hasEntity = entityNames.some((e) => {
+      // エンティティ名が演算子や.でない文脈に現れるか
+      const re = new RegExp(`(?<![\\w.])${e}(?![\\w.])`);
+      return re.test(textNoSpace);
+    });
+
+    if (!hasEntity) {
+      // 全称構文の可能性を検証: タグ名および !タグ名 のみで構成されているか
+      // タグ名を正規表現で構築
+      const tagNamesPattern = Array.from(tagNameSet)
+        .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join("|");
+      const universalPattern = new RegExp(
+        `^(!?(${tagNamesPattern}))([->&|^:()]|!?(${tagNamesPattern}))*$`
+      );
+
+      if (tagNamesPattern && universalPattern.test(textNoSpace)) {
+        // 全エンティティに展開
+        for (const entity of entityNames) {
+          // タグ名 → entity=タグ名、!タグ名 → entity!=タグ名 に置換
+          let expanded = rawCond.text;
+          // まず !タグ名 を entity!=タグ名 に変換（!より先に処理）
+          for (const tag of tags) {
+            const escaped = tag.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            expanded = expanded.replace(
+              new RegExp(`!${escaped}(?=[->&|^:()\\s]|$)`, "g"),
+              `${entity}!=${tag.name}`
+            );
+          }
+          // タグ名のみ → entity=タグ名 に変換
+          for (const tag of tags) {
+            const escaped = tag.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            expanded = expanded.replace(
+              new RegExp(`(?<![!=])${escaped}(?=[->&|^:()\\s]|$)`, "g"),
+              `${entity}=${tag.name}`
+            );
+          }
+          expandedRawConditions.push({ line: rawCond.line, text: expanded });
+        }
+        continue;
+      }
+    }
+
+    expandedRawConditions.push(rawCond);
+  }
+
+  const conditions: Condition[] = expandedRawConditions.map(({ line, text }) => {
+    // 糖衣構文: 右辺がタグ名のみの場合、射影構文に展開
+    let expandedText = text;
+    for (const tag of tags) {
+      // パターン: セット名(=|!=)タグ名 の形式を検出して、セット名.タグ名(=|!=)タグ名.値1に置換
+      const pattern = new RegExp(`(\\w+)(=|!=)${tag.name}(?=[-:&,)|\\s]|$)`, "g");
+      expandedText = expandedText.replace(pattern, `$1.${tag.name}$2${tag.name}.${tag.values[0]}`);
+    }
+
+    return parseConditionExpression(
+      expandedText,
+      line,
+      categories,
+      categoryIndexByName,
+      valueIndexByCategory,
+      valueHits,
+      tagIndexByName
+    );
+  });
+
+  return { categories, realCategoryCount, tags, conditions, warnings };
 };
 
 const compareByOperator = (left: number, right: number, op: "<" | ">" | "<=" | ">="): boolean => {
@@ -748,6 +978,19 @@ const evaluateCondition = (
       return getProjectedValue(expression.operand);
     }
 
+    if (expression.type === "tag-len") {
+      if (!assigned[expression.tagIndex]) {
+        return null;
+      }
+      let count = 0;
+      for (let entity = 0; entity < permutationByCategory[expression.tagIndex].length; entity++) {
+        if (permutationByCategory[expression.tagIndex][entity] === expression.valueIndex) {
+          count++;
+        }
+      }
+      return count;
+    }
+
     if (expression.type === "unary") {
       const value = evaluateArithmeticExpression(expression.operand);
       if (value === null) {
@@ -806,6 +1049,10 @@ const evaluateCondition = (
       return null;
     }
 
+    if (condition.operator === "->") {
+      // A -> B は (!A) | B
+      return leftValue === false ? true : rightValue;
+    }
     const isEqual = leftValue === rightValue;
     return condition.operator === "^" ? !isEqual : isEqual;
   }
@@ -907,7 +1154,7 @@ const createPermutationGenerator = (size: number, callback: (permutation: number
   dfs(0);
 };
 
-const materializeSolution = (categories: Category[], permutationByCategory: number[][]): string[][] => {
+const materializeSolution = (categories: Category[], permutationByCategory: number[][], realCategoryCount: number): string[][] => {
   const entityCount = categories[0].values.length;
   const rows: string[][] = [];
 
@@ -925,18 +1172,26 @@ const materializeSolution = (categories: Category[], permutationByCategory: numb
 
 export const solvePuzzle = (input: string, maxSolutions = 200): SolveResult => {
   const parsed = parsePuzzle(input);
-  const { categories, conditions, warnings } = parsed;
+  const { categories, realCategoryCount, conditions, warnings } = parsed;
 
-  const categoryCount = categories.length;
+  const allCategoryCount = categories.length;
+  const realOnlyCategoryCount = realCategoryCount;
   const entityCount = categories[0].values.length;
 
-  const permutationByCategory: number[][] = Array.from({ length: categoryCount }, () => []);
-  const inverseByCategory: number[][] = Array.from({ length: categoryCount }, () => []);
-  const assigned = new Array<boolean>(categoryCount).fill(false);
+  const permutationByCategory: number[][] = Array.from({ length: allCategoryCount }, () => []);
+  const inverseByCategory: number[][] = Array.from({ length: allCategoryCount }, () => []);
+  const assigned = new Array<boolean>(allCategoryCount).fill(false);
 
   permutationByCategory[0] = Array.from({ length: entityCount }, (_, i) => i);
   inverseByCategory[0] = Array.from({ length: entityCount }, (_, i) => i);
   assigned[0] = true;
+
+  // タグに対しても inverseByCategory を初期化
+  // ただし、複数 entity で同じタグ値を共有するため、その値を持つ最初のentityを記録
+  for (let tagIdx = realOnlyCategoryCount; tagIdx < allCategoryCount; tagIdx++) {
+    const valueCount = categories[tagIdx].values.length;
+    inverseByCategory[tagIdx] = new Array(valueCount).fill(-1);
+  }
 
   const solutions: string[][][] = [];
   let hasMore = false;
@@ -946,9 +1201,10 @@ export const solvePuzzle = (input: string, maxSolutions = 200): SolveResult => {
       return;
     }
 
-    if (categoryIndex >= categoryCount) {
+    if (categoryIndex >= allCategoryCount) {
+      // 全カテゴリが割り当てられた：条件評価を行う
       if (isPartialConsistent(conditions, assigned, permutationByCategory, inverseByCategory, categories)) {
-        solutions.push(materializeSolution(categories, permutationByCategory));
+        solutions.push(materializeSolution(categories, permutationByCategory, realOnlyCategoryCount));
         if (solutions.length >= maxSolutions) {
           hasMore = true;
         }
@@ -956,6 +1212,52 @@ export const solvePuzzle = (input: string, maxSolutions = 200): SolveResult => {
       return;
     }
 
+    if (categoryIndex >= realOnlyCategoryCount) {
+      // タグ部分：複数の値を試す（各 entity ごとに独立して）
+      const valueCount = categories[categoryIndex].values.length;
+
+      // タグの全 entity での値の組み合わせを試す
+      const tagPermutations = Array.from({ length: Math.pow(valueCount, entityCount) }, (_, idx) => {
+        const perm: number[] = [];
+        let remaining = idx;
+        for (let e = 0; e < entityCount; e++) {
+          perm.push(remaining % valueCount);
+          remaining = Math.floor(remaining / valueCount);
+        }
+        return perm;
+      });
+
+      for (const perm of tagPermutations) {
+        if (hasMore) {
+          break;
+        }
+
+        permutationByCategory[categoryIndex] = perm;
+        assigned[categoryIndex] = true;
+
+        // タグ値の逆転換を更新
+        // 複数 entity で同じタグ値を共有するため、その値を持つ最初のentityを記録
+        for (let valueIdx = 0; valueIdx < valueCount; valueIdx++) {
+          inverseByCategory[categoryIndex][valueIdx] = -1;
+        }
+        for (let entity = 0; entity < entityCount; entity++) {
+          const valueIndex = perm[entity];
+          if (inverseByCategory[categoryIndex][valueIndex] === -1) {
+            inverseByCategory[categoryIndex][valueIndex] = entity;
+          }
+        }
+
+        if (isPartialConsistent(conditions, assigned, permutationByCategory, inverseByCategory, categories)) {
+          assignCategory(categoryIndex + 1);
+        }
+
+        assigned[categoryIndex] = false;
+        permutationByCategory[categoryIndex] = [];
+      }
+      return;
+    }
+
+    // 実カテゴリ部分
     createPermutationGenerator(entityCount, (permutation) => {
       if (hasMore) {
         return;
