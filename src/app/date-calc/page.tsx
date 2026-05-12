@@ -7,6 +7,9 @@ import Encoding from 'encoding-japanese';
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 
 export default function DateCalcPage() {
+  const [showManual, setShowManual] = useState(false);
+  const [showHolidayViewer, setShowHolidayViewer] = useState(false);
+  const [holidayViewYear, setHolidayViewYear] = useState<number>(new Date().getFullYear());
   const [date1Text, setDate1Text] = useState('');
   const [date2Text, setDate2Text] = useState('');
   const [result, setResult] = useState<string>('');
@@ -24,7 +27,8 @@ export default function DateCalcPage() {
   useEffect(() => {
     const loadHolidays = async () => {
       try {
-        const response = await fetch('/syukujitsu.csv');
+        const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+        const response = await fetch(`${basePath}/syukujitsu.csv`);
         const arrayBuffer = await response.arrayBuffer();
         const uint8Array = new Uint8Array(arrayBuffer);
         
@@ -340,6 +344,45 @@ export default function DateCalcPage() {
         ? `～${formatRecognizedDate(recognizedDate2)}`
         : '';
 
+  const holidaysForViewYear = Array.from(holidayData.entries())
+    .filter(([date]) => date.startsWith(`${holidayViewYear}-`))
+    .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+    .map(([date, name]) => {
+      const dateObj = new Date(date);
+      return {
+        date,
+        name,
+        dayOfWeek: WEEKDAYS[dateObj.getDay()]
+      };
+    });
+
+  const holidayCountsByYear = Array.from(holidayData.keys()).reduce((acc, date) => {
+    const year = Number(date.slice(0, 4));
+    if (!Number.isNaN(year)) {
+      acc[year] = (acc[year] ?? 0) + 1;
+    }
+    return acc;
+  }, {} as Record<number, number>);
+
+  const holidayYears = Object.keys(holidayCountsByYear)
+    .map((year) => Number(year))
+    .filter((year) => !Number.isNaN(year));
+  const currentYear = new Date().getFullYear();
+  const minHolidayYear = holidayYears.length > 0 ? Math.min(...holidayYears) : currentYear;
+  const maxHolidayYear = holidayYears.length > 0 ? Math.max(...holidayYears) : currentYear;
+
+  const maxHolidayCountPerYear = Object.values(holidayCountsByYear).reduce(
+    (max, count) => Math.max(max, count),
+    0
+  );
+
+  const holidayListAreaHeight = maxHolidayCountPerYear > 0
+    ? Math.min(Math.max(maxHolidayCountPerYear * 28, 240), 420)
+    : 240;
+
+  const canGoPrevYear = holidayViewYear > minHolidayYear;
+  const canGoNextYear = holidayViewYear < maxHolidayYear;
+
   return (
     <main className="max-w-xl mx-auto p-6">
       <div className="mb-4">
@@ -349,6 +392,110 @@ export default function DateCalcPage() {
       </div>
 
       <h1 className="text-2xl font-bold mb-4">日付計算ツール</h1>
+
+      <div className="flex items-center mb-4 gap-2">
+        <button
+          type="button"
+          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+          onClick={() => setShowManual(true)}
+        >
+          使い方
+        </button>
+        <button
+          type="button"
+          className="px-4 py-2 bg-yellow-100 text-yellow-800 rounded hover:bg-yellow-200"
+          onClick={() => {
+            const initialYear = Math.min(Math.max(currentYear, minHolidayYear), maxHolidayYear);
+            setHolidayViewYear(initialYear);
+            setShowHolidayViewer(true);
+          }}
+        >
+          祝日表示
+        </button>
+      </div>
+      {showManual && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative">
+            <button
+              type="button"
+              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
+              onClick={() => setShowManual(false)}
+            >
+              閉じる
+            </button>
+            <h3 className="text-xl font-bold mb-2">日付計算ツールの使い方</h3>
+            <ul className="list-disc pl-5 space-y-2 text-sm">
+              <li>テキストボックスに日付を入力（YYYY-MM-DD形式）</li>
+              <li>📅 ボタンをクリックしてカレンダーから日付を選択</li>
+              <li>2つの日付を入力すると自動的に日数の差を計算します</li>
+              <li>曜日のチェックで指定した曜日の出現回数を確認できます</li>
+              <li>対応形式: 2024-03-19, 2024/03/19, 20240319, 03-19, 0319</li>
+            </ul>
+          </div>
+        </div>
+      )}
+      {showHolidayViewer && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative max-h-[80vh]">
+            <button
+              type="button"
+              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
+              onClick={() => setShowHolidayViewer(false)}
+            >
+              閉じる
+            </button>
+            <h3 className="text-xl font-bold mb-3">祝日一覧 ({minHolidayYear} ～ {maxHolidayYear})</h3>
+            <div className="flex items-center justify-center gap-3 mb-4">
+              <button
+                type="button"
+                className={`px-3 py-1 rounded ${canGoPrevYear ? 'bg-blue-100 text-blue-800 hover:bg-blue-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                onClick={() => setHolidayViewYear((year) => year - 1)}
+                aria-label="前年を表示"
+                disabled={!canGoPrevYear}
+              >
+                ←
+              </button>
+              <p className="text-lg font-semibold w-[8rem] text-center tabular-nums">
+                {holidayViewYear}年 <span className="text-base text-gray-700">({holidaysForViewYear.length}日)</span>
+              </p>
+              <button
+                type="button"
+                className={`px-3 py-1 rounded ${canGoNextYear ? 'bg-blue-100 text-blue-800 hover:bg-blue-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                onClick={() => setHolidayViewYear((year) => year + 1)}
+                aria-label="翌年を表示"
+                disabled={!canGoNextYear}
+              >
+                →
+              </button>
+            </div>
+            <div className="overflow-y-auto border border-gray-200 rounded p-2" style={{ height: `${holidayListAreaHeight}px` }}>
+              {holidaysForViewYear.length > 0 ? (
+                <ul className="space-y-1 text-sm">
+                  {holidaysForViewYear.map((holiday) => (
+                    <li key={`${holiday.date}-${holiday.name}`} className="flex items-center gap-2">
+                      <span className="text-gray-600 font-mono">{holiday.date}</span>
+                      <span className="text-gray-900">{holiday.name}</span>
+                      <span
+                        className={`text-xs font-semibold ${
+                          holiday.dayOfWeek === '日'
+                            ? 'text-red-600'
+                            : holiday.dayOfWeek === '土'
+                              ? 'text-blue-600'
+                              : 'text-gray-600'
+                        }`}
+                      >
+                        ({holiday.dayOfWeek})
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-gray-600">{holidayViewYear}年の祝日データはありません。</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-4">
         <div>
@@ -582,16 +729,6 @@ export default function DateCalcPage() {
           </div>
         )}
 
-        <div className="text-sm text-gray-600 border-t pt-4">
-          <p className="font-medium mb-2">使い方：</p>
-          <ul className="list-disc list-inside space-y-1">
-            <li>テキストボックスに日付を入力（YYYY-MM-DD形式）</li>
-            <li>📅 ボタンをクリックしてカレンダーから日付を選択</li>
-            <li>2つの日付を入力すると自動的に日数の差を計算します</li>
-            <li>曜日のチェックボックスで指定した曜日の出現回数を確認できます</li>
-            <li>対応形式: 2024-03-19, 2024/03/19, 20240319</li>
-          </ul>
-        </div>
       </div>
     </main>
   );
