@@ -71,7 +71,6 @@ export default function CountPage() {
           </div>
         </div>
       )}
-      <h2 className="text-2xl font-bold mb-4">文字数カウントツール</h2>
       <textarea
         className="w-full h-32 p-2 border rounded mb-4"
         value={text}

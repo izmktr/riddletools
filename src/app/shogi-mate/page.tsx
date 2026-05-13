@@ -748,7 +748,7 @@ export default function ShogiMatePage() {
       const board: (Piece | null)[] = Array(81).fill(null);
       
       // 相手の玉を配置
-      if (this.opponentking.position) {
+      if (this.opponentking.position !== null) {
         board[this.opponentking.position] = {
           type: this.opponentking.piece,
           side: 'opponent'
@@ -757,7 +757,7 @@ export default function ShogiMatePage() {
       
       // 相手の駒を配置
       for (const pp of this.opponentpieces) {
-        if (pp.position) {
+        if (pp.position !== null) {
           board[pp.position] = {
             type: pp.piece,
             side: 'opponent'
@@ -767,7 +767,7 @@ export default function ShogiMatePage() {
       
       // 自分の駒を配置
       for (const pp of this.selfpieces) {
-        if (pp.position) {
+        if (pp.position !== null) {
           board[pp.position] = {
             type: pp.piece,
             side: 'self'
@@ -832,7 +832,8 @@ export default function ShogiMatePage() {
     nextField: Field, 
     move: MovePiece
   ): MovePiece | null {
-    const fieldHash = hashField(nextField, move.IsSelfStep() ? 's' : 'o');
+    // nextField is after applying move, so the side to move flips
+    const fieldHash = hashField(nextField, move.IsSelfStep() ? 'o' : 's');
     
     // 既に探索済みの盤面があるか確認
     if (visitedFields.has(fieldHash)) {
@@ -980,7 +981,8 @@ export default function ShogiMatePage() {
       const firstMove = checkOrRegisterField(visitedFields, nextField, move);
       if (firstMove && 0 <= priority){
         if (firstMove.isSuccess()) {
-          const result = setSuccess(move, firstMove.successMove!);
+          const successTarget = (firstMove.successMove === firstMove) ? move : firstMove.successMove!;
+          const result = setSuccess(move, successTarget);
           if (result){
             computedMove = move;
             break;
@@ -1145,10 +1147,71 @@ export default function ShogiMatePage() {
     }
   };
 
+  const getLongRangeAttackStep = (pieceType: PieceType, from: number, to: number): [number, number] | null => {
+    const [fromRow, fromCol] = FromHash(from);
+    const [toRow, toCol] = FromHash(to);
+    const rowDiff = toRow - fromRow;
+    const colDiff = toCol - fromCol;
+    const rowStep = Math.sign(rowDiff);
+    const colStep = Math.sign(colDiff);
+
+    switch (pieceType) {
+      case '飛':
+      case '龍':
+        if (fromRow === toRow && fromCol !== toCol) {
+          return [0, colStep];
+        }
+        if (fromCol === toCol && fromRow !== toRow) {
+          return [rowStep, 0];
+        }
+        return null;
+      case '角':
+      case '馬':
+        if (Math.abs(rowDiff) === Math.abs(colDiff) && rowDiff !== 0) {
+          return [rowStep, colStep];
+        }
+        return null;
+      case '香':
+        if (fromCol === toCol && toRow < fromRow) {
+          return [-1, 0];
+        }
+        return null;
+      default:
+        return null;
+    }
+  };
+
+  const getSquaresBetweenExclusive = (from: number, to: number, rowStep: number, colStep: number): number[] => {
+    const squares: number[] = [];
+    let [row, col] = FromHash(from);
+    const [toRow, toCol] = FromHash(to);
+
+    row += rowStep;
+    col += colStep;
+    while (row !== toRow || col !== toCol) {
+      squares.push(ToHash(row, col));
+      row += rowStep;
+      col += colStep;
+    }
+
+    return squares;
+  };
+
   // 王が詰んでいないかチェック（守り方の手の有効性確認）
   // 駒の移動可能な位置を生成
   const generateSelfMoves = (field: Field, steps : number, prevMove: MovePiece | null): MovePiece[] => {
     const moves: MovePiece[] = [];
+    const moveKeys = new Set<string>();
+
+    const addMove = (piece: PieceType, from: number | null, to: number, change: boolean = false) => {
+      const key = `${piece ?? ''}:${from ?? 'drop'}:${to}:${change ? 1 : 0}`;
+      if (moveKeys.has(key)) {
+        return;
+      }
+
+      moveKeys.add(key);
+      moves.push(new MovePiece(steps, piece, from, to, prevMove, change));
+    };
     
     const board = field.toBoard();
     const kingpos = field.opponentking.position ?? 0;
@@ -1156,7 +1219,7 @@ export default function ShogiMatePage() {
     field.selfpieces.forEach(pp => {
       // 自分の駒の移動範囲を取得
       const pos = pp.position;
-      if (pos && pp.piece) {
+      if (pos !== null && pp.piece) {
         // 自分の駒の移動範囲を取得
         const pieceMoves = getPieceMoves(board, pos, pp.piece, 'self');
         // 王手の範囲を取得
@@ -1164,7 +1227,7 @@ export default function ShogiMatePage() {
         // この2つが重なった場所が王手の範囲
         pieceMoves.forEach(move => {
           if (kingMoveList.some(km => km === move)) {
-            moves.push(new MovePiece(steps, pp.piece, pos, move, prevMove));
+            addMove(pp.piece, pos, move);
           }
         });
         // 成れるコマか
@@ -1177,14 +1240,14 @@ export default function ShogiMatePage() {
             // この2つが重なった場所が王手の範囲
             pieceMoves.forEach(move => {
               if (kingMovePromotedList.some(km => km == move)) {
-                moves.push(new MovePiece(steps, promotedType, pos, move, prevMove, true));
+                addMove(promotedType, pos, move, true);
               }
             }); 
           }else{
             // 移動後の位置が敵陣の場合も成れる
             pieceMoves.forEach(move => {
               if (isEnemyField(move) && kingMovePromotedList.some(km => km == move)) {
-                moves.push(new MovePiece(steps, promotedType, pos, move, prevMove, true));
+                addMove(promotedType, pos, move, true);
               }
             }); 
           }
@@ -1201,11 +1264,65 @@ export default function ShogiMatePage() {
         // 王手の範囲
         kingMoveList.forEach(move => {
           if (board[move] === null){
-            moves.push(new MovePiece(steps, pieceType, null, move, prevMove));
+            addMove(pieceType, null, move);
           }
         });
       }
     });
+
+    // 遠距離コマと王の間に駒がある場合、その駒を動かして王手をかける手を列挙する
+    field.selfpieces.forEach(attacker => {
+      const attackerPos = attacker.position;
+      if (attackerPos === null || !attacker.piece || !LONG_RANGE_PIECES.includes(attacker.piece)) {
+        return;
+      }
+
+      const attackStep = getLongRangeAttackStep(attacker.piece, attackerPos, kingpos);
+      if (!attackStep) {
+        return;
+      }
+
+      const betweenSquares = getSquaresBetweenExclusive(attackerPos, kingpos, attackStep[0], attackStep[1]);
+      const occupiedBetween = betweenSquares.filter(square => board[square] !== null);
+      if (occupiedBetween.length !== 1) {
+        return;
+      }
+
+      const blockerPos = occupiedBetween[0];
+      const blockerOnBoard = board[blockerPos];
+      if (!blockerOnBoard || blockerOnBoard.side !== 'self') {
+        return;
+      }
+
+      const blocker = field.selfpieces.find(pp => pp.position === blockerPos);
+      if (!blocker || !blocker.piece) {
+        return;
+      }
+
+      const betweenSquaresSet = new Set(betweenSquares);
+      const blockerMoves = getPieceMoves(board, blockerPos, blocker.piece, 'self');
+
+      blockerMoves.forEach(move => {
+        if (!betweenSquaresSet.has(move)) {
+          addMove(blocker.piece, blockerPos, move);
+        }
+      });
+
+      if (blocker.piece in PROMOTED_MAP) {
+        const promotedType = PROMOTED_MAP[blocker.piece];
+
+        blockerMoves.forEach(move => {
+          if (betweenSquaresSet.has(move)) {
+            return;
+          }
+
+          if (isEnemyField(blockerPos) || isEnemyField(move)) {
+            addMove(promotedType, blockerPos, move, true);
+          }
+        });
+      }
+    });
+    
 
     return moves;
   };
@@ -1221,7 +1338,7 @@ export default function ShogiMatePage() {
     const board = field.toBoard();
     const attackSquares = new Set<number>();
     field.selfpieces.forEach(pp => {
-      if (pp.position) {
+      if (pp.position !== null) {
         const pieceMoves = getPieceMoves(board, pp.position, pp.piece, 'self', true);
         pieceMoves.forEach(move => {
           attackSquares.add(move);
@@ -1233,7 +1350,7 @@ export default function ShogiMatePage() {
           // 遠距離ユニットの場合は別に記録
           if (pp.piece && LONG_RANGE_PIECES.includes(pp.piece)) {
             // 王に隣接していない
-            if (!areAdjacent(kingpos, pp.position)) {
+            if (pp.position !== null && !areAdjacent(kingpos, pp.position)) {
               longrangePieces.push(pp);
             }
           }
@@ -1315,7 +1432,7 @@ export default function ShogiMatePage() {
 
     if (move.from === null) {
       return `${move.step + 1}手: ${formatPositionFromHash(move.to)}${move.piece}打` + str;
-    } else if (move.from) {
+    } else if (move.from !== null) {
       if (move.change) {
         const actualPiece = UNPROMOTED_MAP[move.piece as string];
         return `${move.step + 1}手: ${formatPositionFromHash(move.to)}${actualPiece}成 [${formatPositionFromHash(move.from)}]` + str;

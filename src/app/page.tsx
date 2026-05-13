@@ -4,6 +4,7 @@ import Link from "next/link";
 
 export default function Home() {
   const Tool = [
+    ["検索・辞書", "/dictionary"],
     ["文字数カウントツール", "/count"],
     ["文字比較ツール", "/compare"],
     ["文字拾いツール", "/pick"],
@@ -13,11 +14,14 @@ export default function Home() {
     ["点字変換ツール", "/braille"],
     ["モールス信号変換ツール", "/morse"],
     ["魚の骨ツール", "/sakananohone"],
+    ["日付計算ツール", "/date-calc"],
   ];
   const Solver = [
     ["しりとりソルバー", "/shiritori"],
     ["スケルトンソルバー", "/skeleton"],
     ["覆面算ソルバー", "/cryptarithmetic"],
+    ["推理パズルソルバー", "/deduction"],
+    ["回文ソルバー", "/palindrome"],
     ["数独ソルバー", "/sudoku"],
     ["中国剰余定理", "/chinese-remainder"],
     ["ぬりかべソルバー(WIP)", "/nurikabe"],
