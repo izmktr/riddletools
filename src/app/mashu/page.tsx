@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 
 type CellMark = "white" | "black" | null;
@@ -372,6 +372,282 @@ class Field {
     this.updateBoardState(updatedCells);
     return changed;
   }
+
+  // 線が2本確定しているマスの残りの辺にno-lineをセット（×印）
+  blockPassedEdges(x: number, y: number): boolean {
+    let changed = false;
+    const updatedCells: Array<[number, number]> = [[x, y]];
+    const directions: Array<0 | 1 | 2 | 3> = [0, 1, 2, 3];
+    const lines = this.getSurroundingLines(x, y);
+
+    const lineCount = lines.filter(v => v === "line").length;
+    const undecidedIndices = directions.filter((_, idx) => lines[idx] === "undecided");
+
+    if (lineCount === 2 && undecidedIndices.length > 0) {
+      for (const target of undecidedIndices) {
+        if (this.setLineInDirection(x, y, target, "no-line")) {
+          changed = true;
+          updatedCells.push(this.getNeighborByDirection(x, y, target));
+        }
+      }
+    }
+
+    this.updateBoardState(updatedCells);
+    return changed;
+  }
+
+  // 黒丸から各方向に2マス延ばせない場合（外周・盤面端にぶつかる）、その方向を no-line にする
+  checkBlackCanExtend(x: number, y: number): boolean {
+    let changed = false;
+    const updatedCells: Array<[number, number]> = [[x, y]];
+
+    const checkDirs: Array<[0 | 1 | 2 | 3, number, number]> = [
+      [0,  0, -1], // 上
+      [1,  1,  0], // 右
+      [2,  0,  1], // 下
+      [3, -1,  0], // 左
+    ];
+
+    for (const [dir, dx, dy] of checkDirs) {
+      const firstX = x + dx;
+      const firstY = y + dy;
+      const secondX = x + dx * 2;
+      const secondY = y + dy * 2;
+
+      const firstInBounds = firstX >= 0 && firstX < this.width && firstY >= 0 && firstY < this.height;
+      const secondInBounds = secondX >= 0 && secondX < this.width && secondY >= 0 && secondY < this.height;
+
+      if (!firstInBounds || !secondInBounds) {
+        // 1マス目または2マス目が盤面外 → その方向は引けない
+        if (this.setLineInDirection(x, y, dir, "no-line")) {
+          changed = true;
+          if (firstInBounds) updatedCells.push([firstX, firstY]);
+        }
+      } else if (firstInBounds) {
+        // 1マス目で直進できないか確認
+        const firstLines = this.getSurroundingLines(firstX, firstY);
+
+        // 条件1: 直進先がno-line
+        const straightBlocked = firstLines[dir] === "no-line";
+
+        // 条件2: 1マス目に横断方向のlineがある（直進すると3本になる）
+        // dir=0,2（縦直進）の横断辺: right(1), left(3)
+        // dir=1,3（横直進）の横断辺: up(0), down(2)
+        const [td1, td2] = (dir === 0 || dir === 2) ? [1, 3] : [0, 2];
+        const transverseBlocked = firstLines[td1] === "line" || firstLines[td2] === "line";
+
+        if (straightBlocked || transverseBlocked) {
+          if (this.setLineInDirection(x, y, dir, "no-line")) {
+            changed = true;
+            updatedCells.push([firstX, firstY]);
+          }
+        }
+      }
+    }
+
+    this.updateBoardState(updatedCells);
+    return changed;
+  }
+
+  // 隣のマスが黒丸の場合、その方向に線をつけない（×印）
+  checkAdjacentBlackCells(x: number, y: number): boolean {
+    let changed = false;
+    const updatedCells: Array<[number, number]> = [[x, y]];
+    const directions: Array<0 | 1 | 2 | 3> = [0, 1, 2, 3];
+    const neighbors = [
+      { x, y: y - 1 }, // 上（方向0）
+      { x: x + 1, y }, // 右（方向1）
+      { x, y: y + 1 }, // 下（方向2）
+      { x: x - 1, y }, // 左（方向3）
+    ];
+
+    for (let i = 0; i < 4; i++) {
+      const { x: nx, y: ny } = neighbors[i];
+      if (nx >= 0 && nx < this.width && ny >= 0 && ny < this.height) {
+        const neighborMark = this.getCellMark(nx, ny);
+        if (neighborMark === "black") {
+          if (this.setLineInDirection(x, y, directions[i], "no-line")) {
+            changed = true;
+            updatedCells.push([nx, ny]);
+          }
+        }
+      }
+    }
+
+    this.updateBoardState(updatedCells);
+    return changed;
+  }
+
+  // 終端マスから確定線を辿り、次の終端マスまでのセル列を返す
+  // startX/Y: 辿り始めるセル, fromDir: "来た方向"（逆走しない）
+  private traceToTerminal(
+    startX: number, startY: number, fromDir: 0 | 1 | 2 | 3
+  ): { cells: Array<[number, number]>; reachedTerminal: boolean } {
+    const cells: Array<[number, number]> = [];
+    const visited = new Set<string>();
+    let cx = startX, cy = startY, lastFromDir = fromDir;
+    const directions: Array<0 | 1 | 2 | 3> = [0, 1, 2, 3];
+
+    while (true) {
+      const key = `${cx},${cy}`;
+      if (visited.has(key)) return { cells, reachedTerminal: false };
+      visited.add(key);
+      cells.push([cx, cy]);
+
+      const lines = this.getSurroundingLines(cx, cy);
+      const lineCount = lines.filter(v => v === "line").length;
+
+      if (lineCount === 1) return { cells, reachedTerminal: true };
+      if (lineCount !== 2) return { cells, reachedTerminal: false };
+
+      const nextDir = directions.find(d => d !== lastFromDir && lines[d] === "line");
+      if (nextDir === undefined) return { cells, reachedTerminal: false };
+
+      const [nx, ny] = this.getNeighborByDirection(cx, cy, nextDir);
+      if (nx < 0 || nx >= this.width || ny < 0 || ny >= this.height) return { cells, reachedTerminal: false };
+
+      const reverseDir = ([2, 3, 0, 1] as const)[nextDir];
+      cx = nx; cy = ny; lastFromDir = reverseDir;
+    }
+  }
+
+  // 終端マス同士を繋ぐと局所ループになる場合、その辺をno-lineにする
+  checkPrematureLoop(x: number, y: number): boolean {
+    let changed = false;
+    const lines = this.getSurroundingLines(x, y);
+    const lineCount = lines.filter(v => v === "line").length;
+    if (lineCount !== 1) return false;
+
+    const directions: Array<0 | 1 | 2 | 3> = [0, 1, 2, 3];
+    const updatedCells: Array<[number, number]> = [[x, y]];
+
+    const aLineDir = directions.find(d => lines[d] === "line");
+    if (aLineDir === undefined) return false;
+
+    const [firstX, firstY] = this.getNeighborByDirection(x, y, aLineDir);
+    if (firstX < 0 || firstX >= this.width || firstY < 0 || firstY >= this.height) return false;
+
+    const fromFirstDir = ([2, 3, 0, 1] as const)[aLineDir];
+    const { cells: chainCells, reachedTerminal } = this.traceToTerminal(firstX, firstY, fromFirstDir);
+    if (!reachedTerminal) return false;
+
+    const chainEnd = chainCells[chainCells.length - 1];
+
+    for (const dir of directions) {
+      if (lines[dir] !== "undecided") continue;
+
+      const [nx, ny] = this.getNeighborByDirection(x, y, dir);
+      if (nx < 0 || nx >= this.width || ny < 0 || ny >= this.height) continue;
+
+      // 隣マスも終端マスか確認
+      const neighborLines = this.getSurroundingLines(nx, ny);
+      const neighborLineCount = neighborLines.filter(v => v === "line").length;
+      if (neighborLineCount !== 1) continue;
+
+      // chain の末端が隣マスと一致 → A-B を繋ぐと閉ループになる
+      if (chainEnd[0] !== nx || chainEnd[1] !== ny) continue;
+
+      // ループ外に確定 line がある = 局所ループ → no-line
+      const loopCellSet = new Set<string>();
+      loopCellSet.add(`${x},${y}`);
+      for (const [cx, cy] of chainCells) loopCellSet.add(`${cx},${cy}`);
+
+      let hasOutsideLines = false;
+      outer: for (let gy = 0; gy < this.height; gy++) {
+        for (let gx = 0; gx < this.width; gx++) {
+          if (loopCellSet.has(`${gx},${gy}`)) continue;
+          const gLines = this.getSurroundingLines(gx, gy);
+          if (gLines.some(v => v === "line")) {
+            hasOutsideLines = true;
+            break outer;
+          }
+        }
+      }
+
+      if (hasOutsideLines) {
+        if (this.setLineInDirection(x, y, dir, "no-line")) {
+          changed = true;
+          updatedCells.push([nx, ny]);
+        }
+      }
+    }
+
+    this.updateBoardState(updatedCells);
+    return changed;
+  }
+
+  // ループが完成しているか確認
+  isSolved(): boolean {
+    // 1. 全辺が確定しているか（undecidedがない）
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        const [up, right, down, left] = this.getSurroundingLines(x, y);
+        if (up === "undecided" || right === "undecided" || down === "undecided" || left === "undecided") {
+          return false;
+        }
+      }
+    }
+
+    // 2. 全マスの線が0本か2本（1本だけあるマスはNG）
+    let hasAnyLine = false;
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        const [up, right, down, left] = this.getSurroundingLines(x, y);
+        const lineCount = [up, right, down, left].filter(v => v === "line").length;
+        if (lineCount !== 0 && lineCount !== 2) return false;
+        if (lineCount === 2) hasAnyLine = true;
+      }
+    }
+    if (!hasAnyLine) return false;
+
+    // 3. 線が1つの連続したループを形成しているか（BFS）
+    let firstCell: [number, number] | null = null;
+    for (let y = 0; y < this.height && !firstCell; y++) {
+      for (let x = 0; x < this.width && !firstCell; x++) {
+        const [up, right, down, left] = this.getSurroundingLines(x, y);
+        if ([up, right, down, left].some(v => v === "line")) {
+          firstCell = [x, y];
+        }
+      }
+    }
+    if (!firstCell) return false;
+
+    const visited = new Set<string>();
+    const queue: [number, number][] = [firstCell];
+    visited.add(`${firstCell[0]},${firstCell[1]}`);
+
+    while (queue.length > 0) {
+      const [cx, cy] = queue.shift()!;
+      const [up, right, down, left] = this.getSurroundingLines(cx, cy);
+      const neighbors: Array<[number, number, LineState]> = [
+        [cx, cy - 1, up],
+        [cx + 1, cy, right],
+        [cx, cy + 1, down],
+        [cx - 1, cy, left],
+      ];
+      for (const [nx, ny, state] of neighbors) {
+        if (state !== "line") continue;
+        if (nx < 0 || nx >= this.width || ny < 0 || ny >= this.height) continue;
+        const key = `${nx},${ny}`;
+        if (!visited.has(key)) {
+          visited.add(key);
+          queue.push([nx, ny]);
+        }
+      }
+    }
+
+    // 線が通っている全セルを訪問できたか
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        const [up, right, down, left] = this.getSurroundingLines(x, y);
+        if ([up, right, down, left].some(v => v === "line") && !visited.has(`${x},${y}`)) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
 }
 
 const formatPosition = (x: number, y: number): string => `(${x + 1},${y + 1})`;
@@ -380,13 +656,23 @@ const sampleLines = [
   "・・◯・◯・・・・・",
   "・・・・◯・・・●・",
   "・・●・●・◯・・・",
-  "・・　◯・・◯・・・",
+  "・・・◯・・◯・・・",
   "●・・・・◯・・・◯",
   "・・◯・・・・◯・・",
   "・・●・・・◯・・・",
   "◯・・・●・・・・◯",
   "・・・・・・◯◯・・",
   "・・●・・・・・・●",
+];
+
+const sampleLines2 = [
+  "・◯◯・・・・",
+  "・・・・・・●",
+  "・・・・・・・",
+  "●・・・・・・",
+  "・・・●●・・",
+  "◯・◯・・・◯",
+  "・・・・◯・・",
 ];
 
 const renderMark = (cell: CellMark) => {
@@ -410,76 +696,187 @@ export default function MashuPage() {
   const [exportText, setExportText] = useState("");
   const [importText, setImportText] = useState("");
   const [notice, setNotice] = useState<Notice>(null);
+  const [solved, setSolved] = useState(false);
 
   const showNotice = (message: string, type: "info" | "success" | "error" = "info") => {
     setNotice({ message, type });
     setTimeout(() => setNotice(null), 3000);
   };
 
+  /**
+   * 白丸マスの解析処理
+   * 白丸は直線になるため、周囲の線を確認して推論を進める
+   */
+  const analyzeWhiteCells = (newField: Field): boolean => {
+    let changed = false;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const mark = newField.getCellMark(x, y);
+        if (mark === "white") {
+          // 白丸は直線で通るため、対向する線を確定させる
+          if (newField.analyzeStraight(x, y, true)) changed = true;
+
+          // 確定した線の先のマスの状態を判定
+          const targets = newField.getConfirmedLineTargets(x, y);
+          if (targets.length === 1) {
+            // 1方向にのみ線が確定している場合、その先のマスは曲がる必要がある
+            const [tx, ty] = targets[0];
+            if (newField.analyzeTurn(tx, ty, true)) changed = true;
+          } else if (targets.length === 2) {
+            // 2方向に線が確定している場合、どちらが直線かを判定して処理
+            const [a, b] = targets;
+            const aState = newField.boardState[a[1]]?.[a[0]];
+            const bState = newField.boardState[b[1]]?.[b[0]];
+            if (aState === "straight" && bState !== "turn") {
+              if (newField.analyzeTurn(b[0], b[1], true)) changed = true;
+            } else if (bState === "straight" && aState !== "turn") {
+              if (newField.analyzeTurn(a[0], a[1], true)) changed = true;
+            }
+          }
+        }
+      }
+    }
+
+    return changed;
+  };
+
+  /**
+   * 黒丸マスの解析処理
+   * 黒丸は曲がるため、対向する線をブロックして直線を拡張する
+   */
+  const analyzeBlackCells = (newField: Field): boolean => {
+    let changed = false;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const mark = newField.getCellMark(x, y);
+        if (mark === "black") {
+          // 黒丸から2マス延ばせない方向（外周に近い）を no-line にする
+          if (newField.checkBlackCanExtend(x, y)) changed = true;
+
+          // 隣が黒丸の場合、その方向に線をつけない（×印）
+          if (newField.checkAdjacentBlackCells(x, y)) changed = true;
+
+          // 黒丸は曲がるため、対向する線を確定させない
+          if (newField.analyzeTurn(x, y, true)) changed = true;
+
+          // 黒丸から伸びる直線は、次のマスでも直線が続く
+          if (newField.extendStraightFromBlack(x, y)) changed = true;
+
+          // 確定した2方向の線の先が直線であることを確定させる
+          const targets = newField.getConfirmedLineTargets(x, y);
+          if (targets.length === 2) {
+            const [a, b] = targets;
+            if (newField.analyzeStraight(a[0], a[1], true)) changed = true;
+            if (newField.analyzeStraight(b[0], b[1], true)) changed = true;
+          }
+        }
+      }
+    }
+
+    return changed;
+  };
+
+  /**
+   * 通過済みマスの残り辺にxをつける処理
+   * 全マスを対象に、線が2本確定していたら残りの辺をno-lineにする
+   */
+  const analyzePassedCells = (newField: Field): boolean => {
+    let changed = false;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        // 線が2本確定しているマスの残り辺にxをつける
+        if (newField.blockPassedEdges(x, y)) changed = true;
+      }
+    }
+
+    return changed;
+  };
+
+  /**
+   * 空マスの解析処理
+   * 未確定の線について、周囲の確定線から推論を進める
+   */
+  const analyzeEmptyCells = (newField: Field): boolean => {
+    let changedByGeneric = false;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const mark = newField.getCellMark(x, y);
+        if (mark === null) {
+          // 汎用ルール：確定線の数から未確定線を推論する
+          if (newField.analyzeGeneric(x, y, false)) {
+            changedByGeneric = true;
+          }
+        }
+      }
+    }
+
+    return changedByGeneric;
+  };
+
+  /**
+   * 局所ループ防止チェック
+   * 終端マス同士を繋ぐと全体を含まない閉ループになる辺にxをつける
+   */
+  const analyzePrematureLoops = (newField: Field): boolean => {
+    let changed = false;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (newField.checkPrematureLoop(x, y)) changed = true;
+      }
+    }
+
+    return changed;
+  };
+
+  /**
+   * パズル全体の解析
+   * 白丸・黒丸・空マスを順に処理し、変更がなくなるまで繰り返す
+   */
   const analyze = () => {
     const newField = new Field(board);
 
     let changed = true;
     while (changed) {
       changed = false;
-      let changedByGeneric = false;
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const mark = newField.getCellMark(x, y);
-          if (mark === "white") {
-            if (newField.analyzeStraight(x, y, true)) changed = true;
 
-            const targets = newField.getConfirmedLineTargets(x, y);
-            if (targets.length === 1) {
-              const [tx, ty] = targets[0];
-              if (newField.analyzeTurn(tx, ty, true)) changed = true;
-            } else if (targets.length === 2) {
-              const [a, b] = targets;
-              const aState = newField.boardState[a[1]]?.[a[0]];
-              const bState = newField.boardState[b[1]]?.[b[0]];
-              if (aState === "straight" && bState !== "turn") {
-                if (newField.analyzeTurn(b[0], b[1], true)) changed = true;
-              } else if (bState === "straight" && aState !== "turn") {
-                if (newField.analyzeTurn(a[0], a[1], true)) changed = true;
-              }
-            }
-          } else if (mark === "black") {
-            if (newField.analyzeTurn(x, y, true)) changed = true;
-            if (newField.extendStraightFromBlack(x, y)) changed = true;
+      // 1. 白丸マスの解析
+      if (analyzeWhiteCells(newField)) changed = true;
 
-            const targets = newField.getConfirmedLineTargets(x, y);
-            if (targets.length === 2) {
-              const [a, b] = targets;
-              if (newField.analyzeStraight(a[0], a[1], true)) changed = true;
-              if (newField.analyzeStraight(b[0], b[1], true)) changed = true;
-            }
-          }
-        }
-      }
+      // 2. 黒丸マスの解析
+      if (analyzeBlackCells(newField)) changed = true;
 
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const mark = newField.getCellMark(x, y);
-          if (mark === null) {
-            if (newField.analyzeGeneric(x, y, false)) {
-              changed = true;
-              changedByGeneric = true;
-            }
-          }
-        }
-      }
+      // 3. 通過済みマスの残り辺にxをつける
+      if (analyzePassedCells(newField)) changed = true;
 
+      // 4. 局所ループになる辺にxをつける
+      if (analyzePrematureLoops(newField)) changed = true;
+
+      // 5. 空マスの解析
+      const changedByGeneric = analyzeEmptyCells(newField);
+      if (changedByGeneric) changed = true;
+
+      // 空マスでの変更のみの場合は終了（無限ループ防止）
       if (!changedByGeneric && !changed) {
         break;
       }
     }
 
     setField(newField);
+    const isSolved = newField.isSolved();
+    setSolved(isSolved);
+    if (isSolved) {
+      showNotice("完成しました！", "success");
+    }
   };
 
   const handleSizeChange = () => {
-    const newWidth = Math.max(3, Math.min(20, parseInt(inputWidth) || 3));
-    const newHeight = Math.max(3, Math.min(20, parseInt(inputHeight) || 3));
+    const newWidth = Math.max(3, Math.min(50, parseInt(inputWidth) || 3));
+    const newHeight = Math.max(3, Math.min(50, parseInt(inputHeight) || 3));
 
     const newBoard = createEmptyBoard(newWidth, newHeight);
 
@@ -496,6 +893,7 @@ export default function MashuPage() {
     setBoard(newBoard);
     setField(new Field(newBoard));
     setSelectedCell(null);
+    setSolved(false);
   };
 
   const handleReset = () => {
@@ -503,6 +901,7 @@ export default function MashuPage() {
     setBoard(newBoard);
     setField(new Field(newBoard));
     setSelectedCell(null);
+    setSolved(false);
   };
 
   const applyLinesToBoard = (lines: string[]) => {
@@ -540,6 +939,7 @@ export default function MashuPage() {
     setBoard(newBoard);
     setField(new Field(newBoard));
     setSelectedCell(null);
+    setSolved(false);
   };
 
   const handleSample = () => {
@@ -601,6 +1001,26 @@ export default function MashuPage() {
     newBoard[selectedCell.y][selectedCell.x] = mark;
     setBoard(newBoard);
   };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!selectedCell) return;
+
+      if (e.key === "1") {
+        e.preventDefault();
+        handlePlace("white");
+      } else if (e.key === "2") {
+        e.preventDefault();
+        handlePlace("black");
+      } else if (e.key === "3") {
+        e.preventDefault();
+        handlePlace(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedCell, handlePlace]);
 
   return (
     <main className="max-w-4xl mx-auto p-6">
@@ -699,7 +1119,7 @@ export default function MashuPage() {
           <input
             type="number"
             min="3"
-            max="20"
+            max="50"
             value={inputWidth}
             onChange={e => setInputWidth(e.target.value)}
             className="w-16 p-1 border rounded"
@@ -710,7 +1130,7 @@ export default function MashuPage() {
           <input
             type="number"
             min="3"
-            max="20"
+            max="50"
             value={inputHeight}
             onChange={e => setInputHeight(e.target.value)}
             className="w-16 p-1 border rounded"
@@ -773,6 +1193,9 @@ export default function MashuPage() {
                   const hasDownLine = field.verticalLines[rowIndex]?.[colIndex] === "line";
                   const hasUpLine =
                     rowIndex > 0 && field.verticalLines[rowIndex - 1]?.[colIndex] === "line";
+                  // 外周を除いたno-line（重複描画なし：右辺・下辺のみ）
+                  const hasRightNoLine = colIndex < width - 1 && field.horizontalLines[rowIndex]?.[colIndex] === "no-line";
+                  const hasDownNoLine = rowIndex < height - 1 && field.verticalLines[rowIndex]?.[colIndex] === "no-line";
                   return (
                     <div
                       key={`${rowIndex}-${colIndex}`}
@@ -805,6 +1228,22 @@ export default function MashuPage() {
                           className="absolute left-1/2 w-0.5 bg-red-500 -translate-x-1/2 pointer-events-none z-10"
                           style={{ top: "-1px", bottom: "50%" }}
                         />
+                      )}
+                      {!solved && hasRightNoLine && (
+                        <div
+                          className="absolute text-blue-500 font-bold pointer-events-none z-10 select-none"
+                          style={{ left: "100%", top: "50%", fontSize: "11px", transform: "translate(-50%, -50%)", lineHeight: 1 }}
+                        >
+                          ×
+                        </div>
+                      )}
+                      {!solved && hasDownNoLine && (
+                        <div
+                          className="absolute text-blue-500 font-bold pointer-events-none z-10 select-none"
+                          style={{ left: "50%", top: "100%", fontSize: "11px", transform: "translate(-50%, -50%)", lineHeight: 1 }}
+                        >
+                          ×
+                        </div>
                       )}
                     </div>
                   );
@@ -841,26 +1280,6 @@ export default function MashuPage() {
           </div>
         </div>
       </div>
-
-      {selectedCell && (
-        <div className="mb-4 p-3 border rounded bg-gray-50 text-sm">
-          <div className="font-semibold mb-1">周囲のLineState</div>
-          {(() => {
-            const [up, right, down, left] = field.getSurroundingLines(
-              selectedCell.x,
-              selectedCell.y
-            );
-            return (
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                <div>上: {up}</div>
-                <div>右: {right}</div>
-                <div>下: {down}</div>
-                <div>左: {left}</div>
-              </div>
-            );
-          })()}
-        </div>
-      )}
     </main>
   );
 }
