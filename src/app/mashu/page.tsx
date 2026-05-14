@@ -34,8 +34,8 @@ const createEmptyLines = (width: number, height: number): (LineState)[][] => {
 };
 
 const enforceLineEdges = (
-  horizontal: (LineState)[][],
-  vertical: (LineState)[][]
+  horizontal: LineState[][],
+  vertical: LineState[][]
 ) => {
   const h = horizontal.length;
   const w = horizontal[0]?.length ?? 0;
@@ -50,14 +50,16 @@ const enforceLineEdges = (
 };
 
 type LineShapeState = "undecided" | "one-line" | "blank" | "turn" | "straight";
+type CellTraitState = "undecided" | "turn" | "straight";
 
 class Field {
   board: CellMark[][]; // 盤面の白丸/黒丸/空欄の情報
   boardState: LineShapeState[][]; // 各マスの線の状態（未確定/1本/空白/曲がる/直線）
+  cellTraitState: CellTraitState[][]; // 各マスが通るなら直進/曲がるの属性
   width: number; // 盤面の横幅
   height: number; // 盤面の縦幅
-  horizontalLines: (LineState | undefined)[][]; // 水平線情報（右方向の線）
-  verticalLines: (LineState | undefined)[][]; // 垂直線情報（下方向の線）
+  horizontalLines: LineState[][]; // 水平線情報（右方向の線）
+  verticalLines: LineState[][]; // 垂直線情報（下方向の線）
 
   constructor(board: CellMark[][]) {
     this.board = board;
@@ -68,12 +70,29 @@ class Field {
     this.boardState = Array(this.height)
       .fill(null)
       .map(() => Array(this.width).fill("undecided"));
+    this.cellTraitState = Array(this.height)
+      .fill(null)
+      .map(() => Array(this.width).fill("undecided"));
     enforceLineEdges(this.horizontalLines, this.verticalLines);
+    this.recomputeAllStates();
+  }
+
+  private recomputeAllStates() {
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        this.boardState[y][x] = this.getLineShapeState(x, y);
+      }
+    }
+    this.recomputeCellTraits();
   }
 
   // 指定座標の白丸/黒丸/空欄を取得
   getCellMark(x: number, y: number): CellMark {
     return this.board[y]?.[x] ?? null;
+  }
+
+  getCellTraitState(x: number, y: number): CellTraitState {
+    return this.cellTraitState[y]?.[x] ?? "undecided";
   }
 
   // 指定座標の周囲4方向の線状態を取得（上・右・下・左）
@@ -169,6 +188,105 @@ class Field {
       if (cy < 0 || cy >= this.height || cx < 0 || cx >= this.width) continue;
       this.boardState[cy][cx] = this.getLineShapeState(cx, cy);
     }
+    this.recomputeCellTraits();
+  }
+
+  private getBaseCellTraitState(x: number, y: number): CellTraitState {
+    const shapeState = this.boardState[y]?.[x];
+    if (shapeState === "straight") return "straight";
+    if (shapeState === "turn") return "turn";
+
+    const mark = this.getCellMark(x, y);
+    if (mark === "black") return "turn";
+    if (mark === "white") return "straight";
+
+    const [up, right, down, left] = this.getSurroundingLines(x, y);
+    const noLineCount = [up, right, down, left].filter(v => v === "no-line").length;
+
+    if (
+      (up === "line" && down === "no-line") ||
+      (down === "line" && up === "no-line") ||
+      (left === "line" && right === "no-line") ||
+      (right === "line" && left === "no-line")
+    ) {
+      return "turn";
+    }
+
+    if (noLineCount === 2) {
+      if ((up === "no-line" && down === "no-line") || (left === "no-line" && right === "no-line")) {
+        return "straight";
+      }
+      if (
+        (up === "no-line" && right === "no-line") ||
+        (right === "no-line" && down === "no-line") ||
+        (down === "no-line" && left === "no-line") ||
+        (left === "no-line" && up === "no-line")
+      ) {
+        return "turn";
+      }
+    }
+
+    return "undecided";
+  }
+
+  private recomputeCellTraits() {
+    const nextTraits: CellTraitState[][] = Array(this.height)
+      .fill(null)
+      .map(() => Array(this.width).fill("undecided"));
+
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        nextTraits[y][x] = this.getBaseCellTraitState(x, y);
+      }
+    }
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+
+      for (let y = 0; y < this.height; y++) {
+        for (let x = 0; x < this.width; x++) {
+          if (nextTraits[y][x] === "undecided") {
+            const sandwichedHorizontally =
+              x > 0 &&
+              x + 1 < this.width &&
+              nextTraits[y][x - 1] === "straight" &&
+              nextTraits[y][x + 1] === "straight";
+            const sandwichedVertically =
+              y > 0 &&
+              y + 1 < this.height &&
+              nextTraits[y - 1][x] === "straight" &&
+              nextTraits[y + 1][x] === "straight";
+
+            if (sandwichedHorizontally || sandwichedVertically) {
+              nextTraits[y][x] = "straight";
+              changed = true;
+              continue;
+            }
+          }
+
+          if (this.getCellMark(x, y) === "white") {
+            const targets = this.getConfirmedLineTargets(x, y);
+            if (targets.length === 2) {
+              const [a, b] = targets;
+              const aTrait = nextTraits[a[1]]?.[a[0]] ?? "undecided";
+              const bTrait = nextTraits[b[1]]?.[b[0]] ?? "undecided";
+
+              if (aTrait === "straight" && bTrait === "undecided") {
+                nextTraits[b[1]][b[0]] = "turn";
+                changed = true;
+              }
+              if (bTrait === "straight" && aTrait === "undecided") {
+                nextTraits[a[1]][a[0]] = "turn";
+                changed = true;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    this.cellTraitState = nextTraits;
   }
 
   private getNeighborByDirection(x: number, y: number, direction: 0 | 1 | 2 | 3): [number, number] {
@@ -190,7 +308,7 @@ class Field {
     const lineCount = lines.filter(v => v === "line").length;
 
     if (lineCount === 3) {
-      throw new Error("破綻しました");
+      throw new Error(`破綻しました: ${formatPosition(x, y)} / 理由: 周囲の線が3本確定しています`);
     }
 
     if (decidedIndices.length === 3 && undecidedIndices.length === 1) {
@@ -478,6 +596,50 @@ class Field {
     return changed;
   }
 
+  applyTraitConstraints(x: number, y: number): boolean {
+    let changed = false;
+    const updatedCells: Array<[number, number]> = [[x, y]];
+    const directions: Array<0 | 1 | 2 | 3> = [0, 1, 2, 3];
+    const opposite: Record<0 | 1 | 2 | 3, 0 | 1 | 2 | 3> = {
+      0: 2,
+      1: 3,
+      2: 0,
+      3: 1,
+    };
+    const lines = this.getSurroundingLines(x, y);
+    const trait = this.getCellTraitState(x, y);
+
+    if (trait === "straight") {
+      directions.forEach((dir, idx) => {
+        if (lines[idx] === "no-line") {
+          const opp = opposite[dir];
+          if (this.setLineInDirection(x, y, opp, "no-line")) {
+            changed = true;
+            updatedCells.push(this.getNeighborByDirection(x, y, opp));
+          }
+        }
+      });
+    }
+
+    if (this.getCellMark(x, y) === "black") {
+      directions.forEach(dir => {
+        const [nx, ny] = this.getNeighborByDirection(x, y, dir);
+        if (nx < 0 || nx >= this.width || ny < 0 || ny >= this.height) return;
+        if (this.getCellTraitState(nx, ny) === "turn") {
+          if (this.setLineInDirection(x, y, dir, "no-line")) {
+            changed = true;
+            updatedCells.push([nx, ny]);
+          }
+        }
+      });
+    }
+
+    if (changed) {
+      this.updateBoardState(updatedCells);
+    }
+    return changed;
+  }
+
   // 終端マスから確定線を辿り、次の終端マスまでのセル列を返す
   // startX/Y: 辿り始めるセル, fromDir: "来た方向"（逆走しない）
   private traceToTerminal(
@@ -700,7 +862,20 @@ export default function MashuPage() {
 
   const showNotice = (message: string, type: "info" | "success" | "error" = "info") => {
     setNotice({ message, type });
-    setTimeout(() => setNotice(null), 3000);
+  };
+
+  const checkDeadEndCells = (newField: Field) => {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const lines = newField.getSurroundingLines(x, y);
+        const lineCount = lines.filter(v => v === "line").length;
+        const undecidedCount = lines.filter(v => v === "undecided").length;
+
+        if (lineCount === 1 && undecidedCount === 0) {
+          throw new Error(`破綻しました: ${formatPosition(x, y)} / 理由: 1箇所だけ線が確定し、残り3辺に線が通らないことが確定しています`);
+        }
+      }
+    }
   };
 
   /**
@@ -714,6 +889,14 @@ export default function MashuPage() {
       for (let x = 0; x < width; x++) {
         const mark = newField.getCellMark(x, y);
         if (mark === "white") {
+          const lines = newField.getSurroundingLines(x, y);
+          const lineCount = lines.filter(v => v === "line").length;
+          const undecidedCount = lines.filter(v => v === "undecided").length;
+
+          if (lineCount === 0 && undecidedCount === 0) {
+            throw new Error(`破綻しました: ${formatPosition(x, y)} / 理由: 白マスなのに線が通らないことが確定しています`);
+          }
+
           // 白丸は直線で通るため、対向する線を確定させる
           if (newField.analyzeStraight(x, y, true)) changed = true;
 
@@ -752,6 +935,14 @@ export default function MashuPage() {
       for (let x = 0; x < width; x++) {
         const mark = newField.getCellMark(x, y);
         if (mark === "black") {
+          const lines = newField.getSurroundingLines(x, y);
+          const lineCount = lines.filter(v => v === "line").length;
+          const undecidedCount = lines.filter(v => v === "undecided").length;
+
+          if (lineCount === 0 && undecidedCount === 0) {
+            throw new Error(`破綻しました: ${formatPosition(x, y)} / 理由: 黒マスなのに線が通らないことが確定しています`);
+          }
+
           // 黒丸から2マス延ばせない方向（外周に近い）を no-line にする
           if (newField.checkBlackCanExtend(x, y)) changed = true;
 
@@ -789,6 +980,18 @@ export default function MashuPage() {
       for (let x = 0; x < width; x++) {
         // 線が2本確定しているマスの残り辺にxをつける
         if (newField.blockPassedEdges(x, y)) changed = true;
+      }
+    }
+
+    return changed;
+  };
+
+  const analyzeTraitCells = (newField: Field): boolean => {
+    let changed = false;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (newField.applyTraitConstraints(x, y)) changed = true;
       }
     }
 
@@ -838,39 +1041,52 @@ export default function MashuPage() {
    * 白丸・黒丸・空マスを順に処理し、変更がなくなるまで繰り返す
    */
   const analyze = () => {
-    const newField = new Field(board);
+    try {
+      const newField = new Field(board);
 
-    let changed = true;
-    while (changed) {
-      changed = false;
+      let changed = true;
+      while (changed) {
+        checkDeadEndCells(newField);
+        changed = false;
 
-      // 1. 白丸マスの解析
-      if (analyzeWhiteCells(newField)) changed = true;
+        // 1. 白丸マスの解析
+        if (analyzeWhiteCells(newField)) changed = true;
 
-      // 2. 黒丸マスの解析
-      if (analyzeBlackCells(newField)) changed = true;
+        // 2. 黒丸マスの解析
+        if (analyzeBlackCells(newField)) changed = true;
 
-      // 3. 通過済みマスの残り辺にxをつける
-      if (analyzePassedCells(newField)) changed = true;
+        // 2.5. 属性から線の制約を進める
+        if (analyzeTraitCells(newField)) changed = true;
 
-      // 4. 局所ループになる辺にxをつける
-      if (analyzePrematureLoops(newField)) changed = true;
+        // 3. 通過済みマスの残り辺にxをつける
+        if (analyzePassedCells(newField)) changed = true;
 
-      // 5. 空マスの解析
-      const changedByGeneric = analyzeEmptyCells(newField);
-      if (changedByGeneric) changed = true;
+        // 4. 局所ループになる辺にxをつける
+        if (analyzePrematureLoops(newField)) changed = true;
 
-      // 空マスでの変更のみの場合は終了（無限ループ防止）
-      if (!changedByGeneric && !changed) {
-        break;
+        // 5. 空マスの解析
+        const changedByGeneric = analyzeEmptyCells(newField);
+        if (changedByGeneric) changed = true;
+
+        // 空マスでの変更のみの場合は終了（無限ループ防止）
+        if (!changedByGeneric && !changed) {
+          break;
+        }
       }
-    }
 
-    setField(newField);
-    const isSolved = newField.isSolved();
-    setSolved(isSolved);
-    if (isSolved) {
-      showNotice("完成しました！", "success");
+      setField(newField);
+      const isSolved = newField.isSolved();
+      setSolved(isSolved);
+      if (isSolved) {
+        showNotice("完成しました！", "success");
+      }
+    } catch (error) {
+      setSolved(false);
+      if (error instanceof Error) {
+        showNotice(error.message, "error");
+      } else {
+        showNotice("破綻しました", "error");
+      }
     }
   };
 
@@ -902,6 +1118,7 @@ export default function MashuPage() {
     setField(new Field(newBoard));
     setSelectedCell(null);
     setSolved(false);
+    setNotice(null);
   };
 
   const applyLinesToBoard = (lines: string[]) => {
@@ -947,6 +1164,7 @@ export default function MashuPage() {
   };
 
   const handleAnalyze = () => {
+    setNotice(null);
     analyze();
   };
 
