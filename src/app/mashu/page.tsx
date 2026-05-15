@@ -51,6 +51,18 @@ const enforceLineEdges = (
 
 type LineShapeState = "undecided" | "one-line" | "blank" | "turn" | "straight";
 type CellTraitState = "undecided" | "turn" | "straight";
+type HypothesisAssignment = {
+  x: number;
+  y: number;
+  direction: 0 | 1 | 2 | 3;
+  state: LineState;
+};
+type HypothesisChoice = HypothesisAssignment[];
+type HypothesisCandidate = {
+  x: number;
+  y: number;
+  choices: HypothesisChoice[];
+};
 
 class Field {
   board: CellMark[][]; // 盤面の白丸/黒丸/空欄の情報
@@ -246,25 +258,6 @@ class Field {
 
       for (let y = 0; y < this.height; y++) {
         for (let x = 0; x < this.width; x++) {
-          if (nextTraits[y][x] === "undecided") {
-            const sandwichedHorizontally =
-              x > 0 &&
-              x + 1 < this.width &&
-              nextTraits[y][x - 1] === "straight" &&
-              nextTraits[y][x + 1] === "straight";
-            const sandwichedVertically =
-              y > 0 &&
-              y + 1 < this.height &&
-              nextTraits[y - 1][x] === "straight" &&
-              nextTraits[y + 1][x] === "straight";
-
-            if (sandwichedHorizontally || sandwichedVertically) {
-              nextTraits[y][x] = "straight";
-              changed = true;
-              continue;
-            }
-          }
-
           if (this.getCellMark(x, y) === "white") {
             const targets = this.getConfirmedLineTargets(x, y);
             if (targets.length === 2) {
@@ -294,6 +287,52 @@ class Field {
     if (direction === 1) return [x + 1, y];
     if (direction === 2) return [x, y + 1];
     return [x - 1, y];
+  }
+
+  private getLineStateByDirection(x: number, y: number, direction: 0 | 1 | 2 | 3): LineState {
+    return this.getSurroundingLines(x, y)[direction];
+  }
+
+  clone(): Field {
+    const cloned = new Field(this.board.map(row => row.slice()));
+    cloned.horizontalLines = this.horizontalLines.map(row => row.slice());
+    cloned.verticalLines = this.verticalLines.map(row => row.slice());
+    cloned.boardState = this.boardState.map(row => row.slice()) as LineShapeState[][];
+    cloned.cellTraitState = this.cellTraitState.map(row => row.slice()) as CellTraitState[][];
+    return cloned;
+  }
+
+  applyLineAssignments(assignments: HypothesisAssignment[]): boolean {
+    for (const assignment of assignments) {
+      const current = this.getLineStateByDirection(assignment.x, assignment.y, assignment.direction);
+      if (current !== "undecided" && current !== assignment.state) {
+        return false;
+      }
+    }
+
+    let changed = false;
+    const updatedCells: Array<[number, number]> = [];
+
+    const pushCell = (cx: number, cy: number) => {
+      if (cx < 0 || cx >= this.width || cy < 0 || cy >= this.height) return;
+      if (!updatedCells.some(([ux, uy]) => ux === cx && uy === cy)) {
+        updatedCells.push([cx, cy]);
+      }
+    };
+
+    for (const assignment of assignments) {
+      if (this.setLineInDirection(assignment.x, assignment.y, assignment.direction, assignment.state)) {
+        changed = true;
+        pushCell(assignment.x, assignment.y);
+        const [nx, ny] = this.getNeighborByDirection(assignment.x, assignment.y, assignment.direction);
+        pushCell(nx, ny);
+      }
+    }
+
+    if (changed) {
+      this.updateBoardState(updatedCells);
+    }
+    return changed;
   }
 
   // 汎用チェック：線の数と未確定数から確定を進める
@@ -596,6 +635,47 @@ class Field {
     return changed;
   }
 
+  // 白マスが同一直線上で両側にある場合、中央の白マスはその方向に直進できない
+  // 例: 左右が白なら中央は上下直進、上下が白なら中央は左右直進
+  enforceWhiteChainDirection(x: number, y: number): boolean {
+    if (this.getCellMark(x, y) !== "white") return false;
+
+    let changed = false;
+    const updatedCells: Array<[number, number]> = [[x, y]];
+
+    const hasWhiteLeft = x > 0 && this.getCellMark(x - 1, y) === "white";
+    const hasWhiteRight = x + 1 < this.width && this.getCellMark(x + 1, y) === "white";
+    const hasWhiteUp = y > 0 && this.getCellMark(x, y - 1) === "white";
+    const hasWhiteDown = y + 1 < this.height && this.getCellMark(x, y + 1) === "white";
+
+    if (hasWhiteLeft && hasWhiteRight) {
+      if (this.setLineInDirection(x, y, 1, "no-line")) {
+        changed = true;
+        updatedCells.push([x + 1, y]);
+      }
+      if (this.setLineInDirection(x, y, 3, "no-line")) {
+        changed = true;
+        updatedCells.push([x - 1, y]);
+      }
+    }
+
+    if (hasWhiteUp && hasWhiteDown) {
+      if (this.setLineInDirection(x, y, 0, "no-line")) {
+        changed = true;
+        updatedCells.push([x, y - 1]);
+      }
+      if (this.setLineInDirection(x, y, 2, "no-line")) {
+        changed = true;
+        updatedCells.push([x, y + 1]);
+      }
+    }
+
+    if (changed) {
+      this.updateBoardState(updatedCells);
+    }
+    return changed;
+  }
+
   applyTraitConstraints(x: number, y: number): boolean {
     let changed = false;
     const updatedCells: Array<[number, number]> = [[x, y]];
@@ -859,6 +939,7 @@ export default function MashuPage() {
   const [importText, setImportText] = useState("");
   const [notice, setNotice] = useState<Notice>(null);
   const [solved, setSolved] = useState(false);
+  const [isReanalysisMode, setIsReanalysisMode] = useState(false);
 
   const showNotice = (message: string, type: "info" | "success" | "error" = "info") => {
     setNotice({ message, type });
@@ -889,6 +970,9 @@ export default function MashuPage() {
       for (let x = 0; x < width; x++) {
         const mark = newField.getCellMark(x, y);
         if (mark === "white") {
+          // 白が3連続以上になる並びの中央は、並び方向に直進できない
+          if (newField.enforceWhiteChainDirection(x, y)) changed = true;
+
           const lines = newField.getSurroundingLines(x, y);
           const lineCount = lines.filter(v => v === "line").length;
           const undecidedCount = lines.filter(v => v === "undecided").length;
@@ -1036,52 +1120,251 @@ export default function MashuPage() {
     return changed;
   };
 
+  const solveDeterministically = (newField: Field) => {
+    let changed = true;
+    while (changed) {
+      checkDeadEndCells(newField);
+      changed = false;
+
+      // 1. 白丸マスの解析
+      if (analyzeWhiteCells(newField)) changed = true;
+
+      // 2. 黒丸マスの解析
+      if (analyzeBlackCells(newField)) changed = true;
+
+      // 2.5. 属性から線の制約を進める
+      if (analyzeTraitCells(newField)) changed = true;
+
+      // 3. 通過済みマスの残り辺にxをつける
+      if (analyzePassedCells(newField)) changed = true;
+
+      // 4. 局所ループになる辺にxをつける
+      if (analyzePrematureLoops(newField)) changed = true;
+
+      // 5. 空マスの解析
+      const changedByGeneric = analyzeEmptyCells(newField);
+      if (changedByGeneric) changed = true;
+
+      // 空マスでの変更のみの場合は終了（無限ループ防止）
+      if (!changedByGeneric && !changed) {
+        break;
+      }
+    }
+  };
+
+  const countConfirmedCellsAround = (newField: Field, centerX: number, centerY: number): number => {
+    let confirmedCount = 0;
+
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const x = centerX + dx;
+        const y = centerY + dy;
+
+        if (x < 0 || x >= width || y < 0 || y >= height) {
+          confirmedCount++;
+          continue;
+        }
+
+        const mark = newField.getCellMark(x, y);
+        const shapeState = newField.boardState[y]?.[x];
+        if (mark !== null || shapeState !== "undecided") {
+          confirmedCount++;
+        }
+      }
+    }
+
+    return confirmedCount;
+  };
+
+  const scoreHypothesisCandidate = (
+    newField: Field,
+    x: number,
+    y: number,
+    kind: "black" | "white" | "terminal"
+  ): number => {
+    const lines = newField.getSurroundingLines(x, y);
+    const noLineCount = lines.filter(v => v === "no-line").length;
+    const confirmedCount = countConfirmedCellsAround(newField, x, y);
+
+    let baseScore = 0;
+    let constraintScore = 0;
+
+    if (kind === "black") {
+      baseScore = 3000;
+      constraintScore = noLineCount === 0 ? 4 : noLineCount === 1 ? 2 : 0;
+    } else if (kind === "white") {
+      baseScore = 2000;
+      constraintScore = 2;
+    } else {
+      baseScore = 1000;
+      constraintScore = noLineCount === 0 ? 3 : noLineCount === 1 ? 2 : 0;
+    }
+
+    return baseScore + constraintScore * 100 + confirmedCount;
+  };
+
+  const createWhiteChoices = (newField: Field, x: number, y: number): HypothesisChoice[] => {
+    const lines = newField.getSurroundingLines(x, y);
+    const choices: HypothesisChoice[] = [];
+
+    const tryAddChoice = (directionA: 0 | 1 | 2 | 3, directionB: 0 | 1 | 2 | 3) => {
+      const lineA = lines[directionA];
+      const lineB = lines[directionB];
+      const opposite1 = ([2, 3, 0, 1] as const)[directionA];
+      const opposite2 = ([2, 3, 0, 1] as const)[directionB];
+
+      if (lineA === "no-line" || lineB === "no-line") return;
+      if (lineA === "line" && lineB === "line") {
+        choices.push([]);
+        return;
+      }
+
+      const assignments: HypothesisAssignment[] = [];
+      if (lineA !== "line") assignments.push({ x, y, direction: directionA, state: "line" });
+      if (lineB !== "line") assignments.push({ x, y, direction: directionB, state: "line" });
+      if (lineA !== "no-line") assignments.push({ x, y, direction: opposite1, state: "no-line" });
+      if (lineB !== "no-line") assignments.push({ x, y, direction: opposite2, state: "no-line" });
+      choices.push(assignments);
+    };
+
+    tryAddChoice(0, 2);
+    tryAddChoice(1, 3);
+
+    return choices.filter(choice => choice.length > 0);
+  };
+
+  const createBlackChoices = (newField: Field, x: number, y: number): HypothesisChoice[] => {
+    const lines = newField.getSurroundingLines(x, y);
+    const choices: HypothesisChoice[] = [];
+    const turns: Array<[0 | 1 | 2 | 3, 0 | 1 | 2 | 3]> = [
+      [0, 1],
+      [1, 2],
+      [2, 3],
+      [3, 0],
+    ];
+
+    for (const [lineA, lineB] of turns) {
+      const oppositeA = ([2, 3, 0, 1] as const)[lineA];
+      const oppositeB = ([2, 3, 0, 1] as const)[lineB];
+      if (lines[lineA] === "no-line" || lines[lineB] === "no-line") continue;
+
+      const assignments: HypothesisAssignment[] = [];
+      if (lines[lineA] !== "line") assignments.push({ x, y, direction: lineA, state: "line" });
+      if (lines[lineB] !== "line") assignments.push({ x, y, direction: lineB, state: "line" });
+      if (lines[oppositeA] !== "no-line") assignments.push({ x, y, direction: oppositeA, state: "no-line" });
+      if (lines[oppositeB] !== "no-line") assignments.push({ x, y, direction: oppositeB, state: "no-line" });
+      choices.push(assignments);
+    }
+
+    return choices.filter(choice => choice.length > 0);
+  };
+
+  const createTerminalChoices = (newField: Field, x: number, y: number): HypothesisChoice[] => {
+    const lines = newField.getSurroundingLines(x, y);
+    const choices: HypothesisChoice[] = [];
+
+    for (const direction of [0, 1, 2, 3] as const) {
+      if (lines[direction] !== "undecided") continue;
+      choices.push([{ x, y, direction, state: "line" }]);
+    }
+
+    return choices;
+  };
+
+  const findHypothesisCandidate = (newField: Field): HypothesisCandidate | null => {
+    let bestCandidate: HypothesisCandidate | null = null;
+    let bestScore = -1;
+
+    const considerCandidate = (
+      x: number,
+      y: number,
+      kind: "black" | "white" | "terminal",
+      choices: HypothesisChoice[]
+    ) => {
+      if (choices.length === 0) return;
+      const score = scoreHypothesisCandidate(newField, x, y, kind);
+      if (score > bestScore) {
+        bestScore = score;
+        bestCandidate = { x, y, choices };
+      }
+    };
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const mark = newField.getCellMark(x, y);
+        const lines = newField.getSurroundingLines(x, y);
+        const lineCount = lines.filter(v => v === "line").length;
+
+        if (mark === "black" && lineCount < 2) {
+          considerCandidate(x, y, "black", createBlackChoices(newField, x, y));
+        } else if (mark === "white" && lineCount < 2) {
+          considerCandidate(x, y, "white", createWhiteChoices(newField, x, y));
+        } else if (lineCount === 1) {
+          considerCandidate(x, y, "terminal", createTerminalChoices(newField, x, y));
+        }
+      }
+    }
+
+    return bestCandidate;
+  };
+
+  const runReanalysis = (newField: Field): Field => {
+    solveDeterministically(newField);
+    if (newField.isSolved()) {
+      return newField;
+    }
+
+    const candidate = findHypothesisCandidate(newField);
+    if (!candidate) {
+      throw new Error("再解析できませんでした");
+    }
+
+    for (const choice of candidate.choices) {
+      const trialField = newField.clone();
+      try {
+        if (!trialField.applyLineAssignments(choice)) {
+          continue;
+        }
+        const solvedField = runReanalysis(trialField);
+        if (solvedField.isSolved()) {
+          return solvedField;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    throw new Error("再解析できませんでした");
+  };
+
   /**
    * パズル全体の解析
    * 白丸・黒丸・空マスを順に処理し、変更がなくなるまで繰り返す
    */
   const analyze = () => {
+    let newField: Field | null = null;
     try {
-      const newField = new Field(board);
+      newField = new Field(board);
 
-      let changed = true;
-      while (changed) {
-        checkDeadEndCells(newField);
-        changed = false;
-
-        // 1. 白丸マスの解析
-        if (analyzeWhiteCells(newField)) changed = true;
-
-        // 2. 黒丸マスの解析
-        if (analyzeBlackCells(newField)) changed = true;
-
-        // 2.5. 属性から線の制約を進める
-        if (analyzeTraitCells(newField)) changed = true;
-
-        // 3. 通過済みマスの残り辺にxをつける
-        if (analyzePassedCells(newField)) changed = true;
-
-        // 4. 局所ループになる辺にxをつける
-        if (analyzePrematureLoops(newField)) changed = true;
-
-        // 5. 空マスの解析
-        const changedByGeneric = analyzeEmptyCells(newField);
-        if (changedByGeneric) changed = true;
-
-        // 空マスでの変更のみの場合は終了（無限ループ防止）
-        if (!changedByGeneric && !changed) {
-          break;
-        }
-      }
+      solveDeterministically(newField);
 
       setField(newField);
       const isSolved = newField.isSolved();
       setSolved(isSolved);
       if (isSolved) {
         showNotice("完成しました！", "success");
+        setIsReanalysisMode(false);
+      } else {
+        showNotice("解析が完了しませんでした。再解析できます。", "info");
+        setIsReanalysisMode(true);
       }
     } catch (error) {
+      if (newField) {
+        // 破綻時も、ここまでに確定した線情報を盤面へ反映する
+        setField(newField);
+      }
       setSolved(false);
+      setIsReanalysisMode(false);
       if (error instanceof Error) {
         showNotice(error.message, "error");
       } else {
@@ -1110,6 +1393,7 @@ export default function MashuPage() {
     setField(new Field(newBoard));
     setSelectedCell(null);
     setSolved(false);
+    setIsReanalysisMode(false);
   };
 
   const handleReset = () => {
@@ -1119,6 +1403,7 @@ export default function MashuPage() {
     setSelectedCell(null);
     setSolved(false);
     setNotice(null);
+    setIsReanalysisMode(false);
   };
 
   const applyLinesToBoard = (lines: string[]) => {
@@ -1157,6 +1442,7 @@ export default function MashuPage() {
     setField(new Field(newBoard));
     setSelectedCell(null);
     setSolved(false);
+    setIsReanalysisMode(false);
   };
 
   const handleSample = () => {
@@ -1165,6 +1451,30 @@ export default function MashuPage() {
 
   const handleAnalyze = () => {
     setNotice(null);
+    if (isReanalysisMode) {
+      try {
+        const newField = runReanalysis(field.clone());
+        setField(newField);
+        const isSolved = newField.isSolved();
+        setSolved(isSolved);
+        setIsReanalysisMode(!isSolved);
+        if (isSolved) {
+          showNotice("完成しました！", "success");
+        } else {
+          showNotice("再解析が完了しませんでした。", "info");
+        }
+      } catch (error) {
+        setSolved(false);
+        setIsReanalysisMode(true);
+        if (error instanceof Error) {
+          showNotice(error.message, "error");
+        } else {
+          showNotice("再解析できませんでした", "error");
+        }
+      }
+      return;
+    }
+
     analyze();
   };
 
@@ -1218,6 +1528,7 @@ export default function MashuPage() {
     const newBoard = board.map(row => row.slice());
     newBoard[selectedCell.y][selectedCell.x] = mark;
     setBoard(newBoard);
+    setIsReanalysisMode(false);
   };
 
   useEffect(() => {
@@ -1367,7 +1678,7 @@ export default function MashuPage() {
           className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
           onClick={handleAnalyze}
         >
-          解析
+          {isReanalysisMode ? "再解析" : "解析"}
         </button>
         <button
           className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200"

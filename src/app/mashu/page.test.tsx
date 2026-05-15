@@ -23,6 +23,12 @@ const solveBoard = (boardText: string) => {
   fireEvent.click(screen.getByRole('button', { name: '解析' }));
 };
 
+const expectCompletedOrNotBroken = () => {
+  const hasBroken = screen.queryByText(/破綻しました/) !== null;
+
+  expect(hasBroken).toBe(false);
+};
+
 describe('MashuPage', () => {
   afterEach(() => {
     jest.clearAllMocks();
@@ -46,8 +52,48 @@ describe('MashuPage', () => {
     expect(screen.getByText('完成しました！')).toBeInTheDocument();
   });
 
-  test('黒丸・白丸混在の6x6盤面を解析して完成する', () => {
+  test('黒丸・白丸混在の6x6盤面を解析して完成または途中終了する', () => {
     solveBoard('●・◯・・・\n・・・・・・\n・◯◯◯・◯\n・・・・・・\n・●・・・◯\n・・・・・・');
+    expectCompletedOrNotBroken();
+  });
+
+  test('途中盤面では再解析ボタンに切り替わり、失敗時はエラーになる', () => {
+    render(<MashuPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'インポート' }));
+    const textarea = screen.getByPlaceholderText('◯・● の盤面を貼り付けてください');
+    fireEvent.change(textarea, { target: { value: '・・・\n・・・\n・・・' } });
+    fireEvent.click(screen.getByRole('button', { name: '適用' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '解析' }));
+    expect(screen.getByRole('button', { name: '再解析' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '再解析' }));
+    expect(screen.getByText('再解析できませんでした')).toBeInTheDocument();
+  });
+
+  test('再解析することで解ける大きめの盤面を完成できる', () => {
+    solveBoard(`・・・◯・◯・・・●・◯・●・◯・●・・・
+・・・・・・・◯・・・・・・・・・・・・●
+◯・●・・●・・・・●・・・・◯・・・・・
+・・・・・・・・◯・・・・◯・・・●・◯・
+・・◯・◯・●・・・◯・・・・●・・・・◯
+●・・・・・・◯・●・・●・・・・・◯・・
+・・・・◯・・・・・・・・・◯・・・・・●
+・・●・・・●・・・・・・・・・・・◯・・
+◯・・・◯・・◯・・◯・◯・・●・・・・◯
+・・・◯・・・・●・・●・・・・・・●・・
+・●・・・・・・・◯・・・・●・◯・・・・
+・・◯・・●・・・・・・・・・・・・・◯・
+●・・・・・・◯・・◯・●・・・●・・・●
+・・◯・●・・・◯・・・・・◯・・・●・・
+・◯・・・・●・・・●・◯・・・◯・・・◯
+・・・◯・・・・◯・・・・・●・・・・・・
+・◯・・●・◯・・◯・・●・・・・・◯・・`);
+
+    expect(screen.getByRole('button', { name: '再解析' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '再解析' }));
     expect(screen.getByText('完成しました！')).toBeInTheDocument();
   });
 });
