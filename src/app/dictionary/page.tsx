@@ -230,10 +230,10 @@ export default function DictionaryPage() {
     setMatchedCells(matched);
   }, [searchText, searchType, selectedCols, headers, rows]);
 
-  // 全選択 / 全解除
-  const allSelected = selectedCols.length > 0 && selectedCols.every((v) => v);
+  // 無選択なら全選択 / 1つでも選択中なら全解除
+  const hasAnySelected = selectedCols.some((v) => v);
   const handleSelectAll = () => {
-    if (allSelected) {
+    if (hasAnySelected) {
       setSelectedCols(new Array(headers.length).fill(false));
     } else {
       setSelectedCols(new Array(headers.length).fill(true));
@@ -263,8 +263,18 @@ export default function DictionaryPage() {
       return headers.some((_, ci) => matchedCells.has(`${ri}-${ci}`));
     });
 
+  const displayedRows = visibleRows.slice(0, MAX_RESULTS);
+
+  const resultCountLabel = !hasSearched
+    ? rows.length > MAX_RESULTS
+      ? `表示${displayedRows.length}件（全${rows.length}件）`
+      : `全${rows.length}件`
+    : resultExceeded
+      ? `${MAX_RESULTS}件以上`
+      : `${displayedRows.length}件`;
+
   const handleSingleColCopy = (ci: number) => {
-    const lines = visibleRows.map(({ row }) => row[ci] ?? "");
+    const lines = displayedRows.map(({ row }) => row[ci] ?? "");
     navigator.clipboard.writeText(lines.join("\n")).catch(() => {});
   };
 
@@ -461,7 +471,7 @@ export default function DictionaryPage() {
             onClick={handleSelectAll}
             className="bg-gray-200 hover:bg-gray-300 px-4 py-1.5 rounded transition-colors text-sm font-semibold"
           >
-            {allSelected ? "全解除" : "全選択"}
+            {hasAnySelected ? "全解除" : "全選択"}
           </button>
           <button
             onClick={handleColCopy}
@@ -475,8 +485,12 @@ export default function DictionaryPage() {
       {/* 最大件数超過警告 */}
       {resultExceeded && (
         <div className="mb-3 px-4 py-2 bg-yellow-100 text-yellow-800 border border-yellow-300 rounded">
-          最大件数を超えました（先頤50件のみ表示）
+          最大件数を超えました（先頭50件のみ表示）
         </div>
+      )}
+
+      {headers.length > 0 && (
+        <div className="mb-2 text-sm text-gray-600">{resultCountLabel}</div>
       )}
 
       {/* 辞書テーブル */}
@@ -525,7 +539,7 @@ export default function DictionaryPage() {
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map(({ row, ri }) => (
+              {displayedRows.map(({ row, ri }) => (
                 <tr
                   key={ri}
                   className={ri % 2 === 0 ? "bg-white" : "bg-gray-50"}
