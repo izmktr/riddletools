@@ -21,9 +21,10 @@ export default function Home() {
     ["スケルトンソルバー", "/skeleton"],
     ["覆面算ソルバー", "/cryptarithmetic"],
     ["推理パズルソルバー", "/deduction"],
+    ["中国剰余定理", "/chinese-remainder"],
     ["回文ソルバー", "/palindrome"],
     ["数独ソルバー", "/sudoku"],
-    ["中国剰余定理", "/chinese-remainder"],
+    ["ましゅソルバー", "/mashu"],
     ["ぬりかべソルバー(WIP)", "/nurikabe"],
     ["詰将棋ソルバー", "/shogi-mate"],
   ];

@@ -1884,20 +1884,6 @@ export default function MashuPage() {
         </Link>
       </div>
 
-      {notice && (
-        <div
-          className={`mb-4 p-3 rounded border text-sm ${
-            notice.type === "success"
-              ? "bg-green-100 border-green-400 text-green-800"
-              : notice.type === "error"
-                ? "bg-red-100 border-red-400 text-red-800"
-                : "bg-blue-100 border-blue-400 text-blue-800"
-          }`}
-        >
-          {notice.message}
-        </div>
-      )}
-
       {reanalysisProgress && (
         <div className="mb-4 p-3 rounded border text-sm bg-yellow-100 border-yellow-400 text-yellow-800 animate-pulse">
           {reanalysisProgress}
@@ -2037,6 +2023,20 @@ export default function MashuPage() {
           インポート
         </button>
       </div>
+
+      {notice && (
+        <div
+          className={`mb-4 p-3 rounded border text-sm ${
+            notice.type === "success"
+              ? "bg-green-100 border-green-400 text-green-800"
+              : notice.type === "error"
+                ? "bg-red-100 border-red-400 text-red-800"
+                : "bg-blue-100 border-blue-400 text-blue-800"
+          }`}
+        >
+          {notice.message}
+        </div>
+      )}
 
       <div className="mb-4">
         <h3 className="font-semibold mb-2">盤面（クリックで選択）</h3>
