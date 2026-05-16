@@ -58,10 +58,72 @@ type HypothesisAssignment = {
   state: LineState;
 };
 type HypothesisChoice = HypothesisAssignment[];
+type HypothesisKind = "black" | "white" | "terminal";
 type HypothesisCandidate = {
   x: number;
   y: number;
   choices: HypothesisChoice[];
+};
+type GridCoord = {
+  x: number;
+  y: number;
+};
+type ReanalysisControl = {
+  startedAt: number;
+  lastYieldAt: number;
+  lastProgressAt: number;
+  lastFieldUpdateAt: number;
+  nodes: number;
+  maxNodes: number;
+  maxMs: number;
+};
+
+const REANALYSIS_MAX_NODES = 100000;
+const REANALYSIS_MAX_MS = 60000;
+const REANALYSIS_FIELD_UPDATE_INTERVAL_MS = 200;
+const SHOULD_YIELD_IN_REANALYSIS = process.env.NODE_ENV !== "test";
+const waitForNextTick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+
+// 再解析候補のスコアリング基準はここで一元管理する。
+const HYPOTHESIS_SCORING = {
+  // 周辺の確定状況を見る範囲（2なら 5x5）。
+  neighborhoodRadius: 2,
+  // 制約スコア1点あたりの重み。
+  constraintWeight: 1000,
+  // 前回解析座標から遠い候補に与える距離ペナルティの重み。
+  distancePenaltyWeight: 100,
+  byKind: {
+    black: {
+      // 候補種別そのものの優先度。
+      baseScore: 2000,
+      // no-line の本数ごとの加点（キーにない本数は defaultConstraintScore を使う）。
+      noLineConstraintScore: {
+        0: 4,
+        1: 2,
+      },
+      defaultConstraintScore: 0,
+    },
+    white: {
+      baseScore: 2000,
+      noLineConstraintScore: {},
+      defaultConstraintScore: 2,
+    },
+    terminal: {
+      baseScore: 2000,
+      noLineConstraintScore: {
+        0: 3,
+        1: 2,
+      },
+      defaultConstraintScore: 0,
+    },
+  },
+} as const;
+
+class ReanalysisLimitError extends Error {}
+
+type TerminalPair = {
+  a: string;
+  b: string;
 };
 
 class Field {
@@ -72,6 +134,9 @@ class Field {
   height: number; // 盤面の縦幅
   horizontalLines: LineState[][]; // 水平線情報（右方向の線）
   verticalLines: LineState[][]; // 垂直線情報（下方向の線）
+  terminalPairs: Map<number, TerminalPair>; // 終端同士のペア（a===b は閉ループ）
+  terminalEndpointToPairId: Map<string, number>; // 終端座標キー -> ペアID
+  nextTerminalPairId: number;
 
   constructor(board: CellMark[][]) {
     this.board = board;
@@ -85,8 +150,126 @@ class Field {
     this.cellTraitState = Array(this.height)
       .fill(null)
       .map(() => Array(this.width).fill("undecided"));
+    this.terminalPairs = new Map();
+    this.terminalEndpointToPairId = new Map();
+    this.nextTerminalPairId = 1;
     enforceLineEdges(this.horizontalLines, this.verticalLines);
     this.recomputeAllStates();
+  }
+
+  private coordKey(x: number, y: number): string {
+    return `${x},${y}`;
+  }
+
+  private getLineDegree(x: number, y: number): number {
+    return this.getSurroundingLines(x, y).filter(v => v === "line").length;
+  }
+
+  private addTerminalPairByKey(a: string, b: string) {
+    const pairId = this.nextTerminalPairId++;
+    this.terminalPairs.set(pairId, { a, b });
+    this.terminalEndpointToPairId.set(a, pairId);
+    if (b !== a) {
+      this.terminalEndpointToPairId.set(b, pairId);
+    }
+  }
+
+  private removeTerminalPair(pairId: number): TerminalPair | null {
+    const pair = this.terminalPairs.get(pairId);
+    if (!pair) return null;
+
+    if (this.terminalEndpointToPairId.get(pair.a) === pairId) {
+      this.terminalEndpointToPairId.delete(pair.a);
+    }
+    if (pair.b !== pair.a && this.terminalEndpointToPairId.get(pair.b) === pairId) {
+      this.terminalEndpointToPairId.delete(pair.b);
+    }
+
+    this.terminalPairs.delete(pairId);
+    return pair;
+  }
+
+  private getTerminalPairInfo(endpointKey: string): { pairId: number; partnerKey: string } | null {
+    const pairId = this.terminalEndpointToPairId.get(endpointKey);
+    if (pairId === undefined) return null;
+    const pair = this.terminalPairs.get(pairId);
+    if (!pair) return null;
+
+    if (pair.a === endpointKey) {
+      return { pairId, partnerKey: pair.b };
+    }
+    if (pair.b === endpointKey) {
+      return { pairId, partnerKey: pair.a };
+    }
+
+    return null;
+  }
+
+  private updateTerminalPairsOnLineAdd(x1: number, y1: number, x2: number, y2: number) {
+    const key1 = this.coordKey(x1, y1);
+    const key2 = this.coordKey(x2, y2);
+    const degree1 = this.getLineDegree(x1, y1);
+    const degree2 = this.getLineDegree(x2, y2);
+
+    if (degree1 >= 2 || degree2 >= 2) {
+      throw new Error(
+        `破綻しました: ${formatPosition(x1, y1)}-${formatPosition(x2, y2)} / 理由: 1マスから3本以上の線が出ます`
+      );
+    }
+
+    const pairInfo1 = degree1 === 1 ? this.getTerminalPairInfo(key1) : null;
+    const pairInfo2 = degree2 === 1 ? this.getTerminalPairInfo(key2) : null;
+
+    if (degree1 === 1 && !pairInfo1) {
+      throw new Error("終端管理の整合性が崩れました (endpoint-1)");
+    }
+    if (degree2 === 1 && !pairInfo2) {
+      throw new Error("終端管理の整合性が崩れました (endpoint-2)");
+    }
+
+    if (degree1 === 0 && degree2 === 0) {
+      this.addTerminalPairByKey(key1, key2);
+      return;
+    }
+
+    if (degree1 === 1 && degree2 === 0) {
+      const info = pairInfo1!;
+      const partner = info.partnerKey;
+      this.removeTerminalPair(info.pairId);
+      this.addTerminalPairByKey(partner, key2);
+      return;
+    }
+
+    if (degree1 === 0 && degree2 === 1) {
+      const info = pairInfo2!;
+      const partner = info.partnerKey;
+      this.removeTerminalPair(info.pairId);
+      this.addTerminalPairByKey(partner, key1);
+      return;
+    }
+
+    if (degree1 === 1 && degree2 === 1) {
+      const info1 = pairInfo1!;
+      const info2 = pairInfo2!;
+
+      if (info1.pairId === info2.pairId) {
+        this.removeTerminalPair(info1.pairId);
+        this.addTerminalPairByKey(key1, key1);
+
+        if (this.terminalPairs.size !== 1) {
+          throw new Error(
+            `破綻しました: ${formatPosition(x1, y1)}-${formatPosition(x2, y2)} / 理由: 小さいループが完成しました`
+          );
+        }
+        return;
+      }
+
+      const partner1 = info1.partnerKey;
+      const partner2 = info2.partnerKey;
+      this.removeTerminalPair(info1.pairId);
+      this.removeTerminalPair(info2.pairId);
+      this.addTerminalPairByKey(partner1, partner2);
+    }
   }
 
   private recomputeAllStates() {
@@ -165,27 +348,50 @@ class Field {
     direction: 0 | 1 | 2 | 3,
     state: LineState
   ): boolean {
+    let nx = x;
+    let ny = y;
+
     if (direction === 0) {
       if (y <= 0) return false;
       if (this.verticalLines[y - 1][x] !== state) {
+        nx = x;
+        ny = y - 1;
+        if (state === "line") {
+          this.updateTerminalPairsOnLineAdd(x, y, nx, ny);
+        }
         this.verticalLines[y - 1][x] = state;
         return true;
       }
     } else if (direction === 1) {
       if (x + 1 >= this.width) return false;
       if (this.horizontalLines[y][x] !== state) {
+        nx = x + 1;
+        ny = y;
+        if (state === "line") {
+          this.updateTerminalPairsOnLineAdd(x, y, nx, ny);
+        }
         this.horizontalLines[y][x] = state;
         return true;
       }
     } else if (direction === 2) {
       if (y + 1 >= this.height) return false;
       if (this.verticalLines[y][x] !== state) {
+        nx = x;
+        ny = y + 1;
+        if (state === "line") {
+          this.updateTerminalPairsOnLineAdd(x, y, nx, ny);
+        }
         this.verticalLines[y][x] = state;
         return true;
       }
     } else {
       if (x <= 0) return false;
       if (this.horizontalLines[y][x - 1] !== state) {
+        nx = x - 1;
+        ny = y;
+        if (state === "line") {
+          this.updateTerminalPairsOnLineAdd(x, y, nx, ny);
+        }
         this.horizontalLines[y][x - 1] = state;
         return true;
       }
@@ -299,6 +505,11 @@ class Field {
     cloned.verticalLines = this.verticalLines.map(row => row.slice());
     cloned.boardState = this.boardState.map(row => row.slice()) as LineShapeState[][];
     cloned.cellTraitState = this.cellTraitState.map(row => row.slice()) as CellTraitState[][];
+    cloned.terminalPairs = new Map(
+      Array.from(this.terminalPairs.entries()).map(([pairId, pair]) => [pairId, { ...pair }])
+    );
+    cloned.terminalEndpointToPairId = new Map(this.terminalEndpointToPairId);
+    cloned.nextTerminalPairId = this.nextTerminalPairId;
     return cloned;
   }
 
@@ -940,6 +1151,8 @@ export default function MashuPage() {
   const [notice, setNotice] = useState<Notice>(null);
   const [solved, setSolved] = useState(false);
   const [isReanalysisMode, setIsReanalysisMode] = useState(false);
+  const [reanalysisProgress, setReanalysisProgress] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const showNotice = (message: string, type: "info" | "success" | "error" = "info") => {
     setNotice({ message, type });
@@ -1154,9 +1367,10 @@ export default function MashuPage() {
 
   const countConfirmedCellsAround = (newField: Field, centerX: number, centerY: number): number => {
     let confirmedCount = 0;
+    const radius = HYPOTHESIS_SCORING.neighborhoodRadius;
 
-    for (let dy = -2; dy <= 2; dy++) {
-      for (let dx = -2; dx <= 2; dx++) {
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
         const x = centerX + dx;
         const y = centerY + dy;
 
@@ -1180,27 +1394,29 @@ export default function MashuPage() {
     newField: Field,
     x: number,
     y: number,
-    kind: "black" | "white" | "terminal"
+    kind: HypothesisKind,
+    previousCoord: GridCoord | null
   ): number => {
     const lines = newField.getSurroundingLines(x, y);
     const noLineCount = lines.filter(v => v === "no-line").length;
     const confirmedCount = countConfirmedCellsAround(newField, x, y);
+    const scoring = HYPOTHESIS_SCORING.byKind[kind];
+    const mappedConstraint =
+      scoring.noLineConstraintScore[
+        noLineCount as keyof typeof scoring.noLineConstraintScore
+      ];
+    const constraintScore = mappedConstraint ?? scoring.defaultConstraintScore;
+    const distancePenalty = previousCoord
+      ? (Math.abs(previousCoord.x - x) + Math.abs(previousCoord.y - y)) *
+        HYPOTHESIS_SCORING.distancePenaltyWeight
+      : 0;
 
-    let baseScore = 0;
-    let constraintScore = 0;
-
-    if (kind === "black") {
-      baseScore = 3000;
-      constraintScore = noLineCount === 0 ? 4 : noLineCount === 1 ? 2 : 0;
-    } else if (kind === "white") {
-      baseScore = 2000;
-      constraintScore = 2;
-    } else {
-      baseScore = 1000;
-      constraintScore = noLineCount === 0 ? 3 : noLineCount === 1 ? 2 : 0;
-    }
-
-    return baseScore + constraintScore * 100 + confirmedCount;
+    return (
+      scoring.baseScore +
+      constraintScore * HYPOTHESIS_SCORING.constraintWeight +
+      confirmedCount -
+      distancePenalty
+    );
   };
 
   const createWhiteChoices = (newField: Field, x: number, y: number): HypothesisChoice[] => {
@@ -1222,8 +1438,8 @@ export default function MashuPage() {
       const assignments: HypothesisAssignment[] = [];
       if (lineA !== "line") assignments.push({ x, y, direction: directionA, state: "line" });
       if (lineB !== "line") assignments.push({ x, y, direction: directionB, state: "line" });
-      if (lineA !== "no-line") assignments.push({ x, y, direction: opposite1, state: "no-line" });
-      if (lineB !== "no-line") assignments.push({ x, y, direction: opposite2, state: "no-line" });
+      if (lineA !== "line") assignments.push({ x, y, direction: opposite1, state: "no-line" });
+      if (lineB !== "line") assignments.push({ x, y, direction: opposite2, state: "no-line" });
       choices.push(assignments);
     };
 
@@ -1271,18 +1487,21 @@ export default function MashuPage() {
     return choices;
   };
 
-  const findHypothesisCandidate = (newField: Field): HypothesisCandidate | null => {
+  const findHypothesisCandidate = (
+    newField: Field,
+    previousCoord: GridCoord | null
+  ): HypothesisCandidate | null => {
     let bestCandidate: HypothesisCandidate | null = null;
     let bestScore = -1;
 
     const considerCandidate = (
       x: number,
       y: number,
-      kind: "black" | "white" | "terminal",
+      kind: HypothesisKind,
       choices: HypothesisChoice[]
     ) => {
       if (choices.length === 0) return;
-      const score = scoreHypothesisCandidate(newField, x, y, kind);
+      const score = scoreHypothesisCandidate(newField, x, y, kind, previousCoord);
       if (score > bestScore) {
         bestScore = score;
         bestCandidate = { x, y, choices };
@@ -1308,28 +1527,111 @@ export default function MashuPage() {
     return bestCandidate;
   };
 
-  const runReanalysis = (newField: Field): Field => {
+  const runReanalysis = async (
+    newField: Field,
+    callbacks: {
+      onProgress?: (message: string) => void;
+      onFieldUpdate?: (snapshot: Field) => void;
+    } = {},
+    depth: number = 0,
+    previousCoord: GridCoord | null = null,
+    control?: ReanalysisControl
+  ): Promise<Field> => {
+    const activeControl =
+      control ?? {
+        startedAt: Date.now(),
+        lastYieldAt: Date.now(),
+        lastProgressAt: 0,
+        lastFieldUpdateAt: 0,
+        nodes: 0,
+        maxNodes: REANALYSIS_MAX_NODES,
+        maxMs: REANALYSIS_MAX_MS,
+      };
+
+    activeControl.nodes++;
+    if (activeControl.nodes > activeControl.maxNodes) {
+      throw new ReanalysisLimitError("再解析が上限に達しました。盤面を減らすか、ヒントを増やしてください");
+    }
+    if (Date.now() - activeControl.startedAt > activeControl.maxMs) {
+      throw new ReanalysisLimitError("再解析に時間がかかりすぎています。盤面を減らすか、ヒントを増やしてください");
+    }
+
+    if (callbacks.onProgress && depth === 0) {
+      callbacks.onProgress(`解析中... 深さ ${depth} で処理中`);
+      activeControl.lastProgressAt = Date.now();
+    }
+
+    const now = Date.now();
+    if (SHOULD_YIELD_IN_REANALYSIS && now - activeControl.lastYieldAt >= 40) {
+      activeControl.lastYieldAt = now;
+      await waitForNextTick();
+    }
+
     solveDeterministically(newField);
+
+    const solvedNow = Date.now();
+    if (
+      callbacks.onFieldUpdate &&
+      (depth === 0 || solvedNow - activeControl.lastFieldUpdateAt >= REANALYSIS_FIELD_UPDATE_INTERVAL_MS)
+    ) {
+      callbacks.onFieldUpdate(newField.clone());
+      activeControl.lastFieldUpdateAt = solvedNow;
+    }
+
     if (newField.isSolved()) {
       return newField;
     }
 
-    const candidate = findHypothesisCandidate(newField);
+    const candidate = findHypothesisCandidate(newField, previousCoord);
     if (!candidate) {
       throw new Error("再解析できませんでした");
     }
 
-    for (const choice of candidate.choices) {
+    if (callbacks.onProgress && (depth === 0 || now - activeControl.lastProgressAt >= 500)) {
+      callbacks.onProgress(
+        `解析中... 深さ ${depth}: (${candidate.x + 1},${candidate.y + 1}) を試行 (${candidate.choices.length}通り)`
+      );
+      activeControl.lastProgressAt = now;
+    }
+
+    for (let choiceIdx = 0; choiceIdx < candidate.choices.length; choiceIdx++) {
+      const choice = candidate.choices[choiceIdx];
       const trialField = newField.clone();
       try {
         if (!trialField.applyLineAssignments(choice)) {
           continue;
         }
-        const solvedField = runReanalysis(trialField);
+
+        const snapshotNow = Date.now();
+        if (
+          callbacks.onFieldUpdate &&
+          snapshotNow - activeControl.lastFieldUpdateAt >= REANALYSIS_FIELD_UPDATE_INTERVAL_MS
+        ) {
+          callbacks.onFieldUpdate(trialField.clone());
+          activeControl.lastFieldUpdateAt = snapshotNow;
+        }
+
+        const choiceNow = Date.now();
+        if (callbacks.onProgress && choiceNow - activeControl.lastProgressAt >= 500) {
+          callbacks.onProgress(
+            `解析中... 深さ ${depth}: (${candidate.x + 1},${candidate.y + 1}) の選択肢 ${choiceIdx + 1}/${candidate.choices.length}`
+          );
+          activeControl.lastProgressAt = choiceNow;
+        }
+        const solvedField = await runReanalysis(
+          trialField,
+          callbacks,
+          depth + 1,
+          { x: candidate.x, y: candidate.y },
+          activeControl
+        );
         if (solvedField.isSolved()) {
           return solvedField;
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof ReanalysisLimitError) {
+          throw error;
+        }
         continue;
       }
     }
@@ -1449,15 +1751,28 @@ export default function MashuPage() {
     applyLinesToBoard(sampleLines);
   };
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
+    if (isAnalyzing) return;
+
     setNotice(null);
     if (isReanalysisMode) {
+      setIsAnalyzing(true);
+      setReanalysisProgress("解析中... 再解析を開始します");
+      await waitForNextTick();
       try {
-        const newField = runReanalysis(field.clone());
+        const newField = await runReanalysis(field.clone(), {
+          onProgress: (message) => {
+            setReanalysisProgress(message);
+          },
+          onFieldUpdate: (snapshot) => {
+            setField(snapshot);
+          },
+        });
         setField(newField);
         const isSolved = newField.isSolved();
         setSolved(isSolved);
         setIsReanalysisMode(!isSolved);
+        setReanalysisProgress(null);
         if (isSolved) {
           showNotice("完成しました！", "success");
         } else {
@@ -1466,11 +1781,14 @@ export default function MashuPage() {
       } catch (error) {
         setSolved(false);
         setIsReanalysisMode(true);
+        setReanalysisProgress(null);
         if (error instanceof Error) {
           showNotice(error.message, "error");
         } else {
           showNotice("再解析できませんでした", "error");
         }
+      } finally {
+        setIsAnalyzing(false);
       }
       return;
     }
@@ -1523,6 +1841,13 @@ export default function MashuPage() {
     setSelectedCell({ x: col, y: row });
   };
 
+  const isConfirmedCell = (x: number, y: number): boolean => {
+    const lines = field.getSurroundingLines(x, y);
+    const lineCount = lines.filter(v => v === "line").length;
+    const noLineCount = lines.filter(v => v === "no-line").length;
+    return lineCount === 2 || noLineCount === 4;
+  };
+
   const handlePlace = (mark: CellMark) => {
     if (!selectedCell) return;
     const newBoard = board.map(row => row.slice());
@@ -1570,6 +1895,12 @@ export default function MashuPage() {
           }`}
         >
           {notice.message}
+        </div>
+      )}
+
+      {reanalysisProgress && (
+        <div className="mb-4 p-3 rounded border text-sm bg-yellow-100 border-yellow-400 text-yellow-800 animate-pulse">
+          {reanalysisProgress}
         </div>
       )}
 
@@ -1677,8 +2008,9 @@ export default function MashuPage() {
         <button
           className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
           onClick={handleAnalyze}
+          disabled={isAnalyzing}
         >
-          {isReanalysisMode ? "再解析" : "解析"}
+          {isAnalyzing ? "再解析中..." : isReanalysisMode ? "再解析" : "解析"}
         </button>
         <button
           className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200"
@@ -1715,6 +2047,7 @@ export default function MashuPage() {
                 {row.map((cell, colIndex) => {
                   const isSelected =
                     selectedCell && selectedCell.x === colIndex && selectedCell.y === rowIndex;
+                  const isConfirmed = !solved && isConfirmedCell(colIndex, rowIndex);
                   const mark = renderMark(cell);
                   const hasRightLine = field.horizontalLines[rowIndex]?.[colIndex] === "line";
                   const hasLeftLine =
@@ -1729,7 +2062,11 @@ export default function MashuPage() {
                     <div
                       key={`${rowIndex}-${colIndex}`}
                       className={`w-10 h-10 border border-gray-300 cursor-pointer flex items-center justify-center text-lg font-bold relative ${
-                        isSelected ? "bg-yellow-100" : "bg-white hover:bg-gray-100"
+                        isSelected
+                          ? "bg-yellow-200"
+                          : isConfirmed
+                            ? "bg-yellow-50 hover:bg-yellow-100"
+                            : "bg-white hover:bg-gray-100"
                       }`}
                       onClick={() => handleCellClick(rowIndex, colIndex)}
                     >
