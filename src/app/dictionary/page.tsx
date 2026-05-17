@@ -50,6 +50,7 @@ export default function DictionaryPage() {
   const [hasSearched, setHasSearched] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [resultExceeded, setResultExceeded] = useState(false);
+  const [sortState, setSortState] = useState<{ col: number; direction: "asc" | "desc" } | null>(null);
   const MAX_RESULTS = 50;
 
   // dic/index.csv を読み込む
@@ -114,6 +115,7 @@ export default function DictionaryPage() {
         setHasSearched(false);
         setResultExceeded(false);
         setSearchText("");
+        setSortState(null);
       })
       .catch((e) => {
         setLoadError(`辞書ファイルの読み込みに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
@@ -194,7 +196,16 @@ export default function DictionaryPage() {
       return headers.some((_, ci) => matchedCells.has(`${ri}-${ci}`));
     });
 
-  const displayedRows = visibleRows.slice(0, MAX_RESULTS);
+  const baseDisplayedRows = visibleRows.slice(0, MAX_RESULTS);
+
+  const displayedRows = sortState
+    ? [...baseDisplayedRows].sort((a, b) => {
+      const left = a.row[sortState.col] ?? "";
+      const right = b.row[sortState.col] ?? "";
+      const compared = left.localeCompare(right, "ja", { numeric: true, sensitivity: "base" });
+      return sortState.direction === "asc" ? compared : -compared;
+    })
+    : baseDisplayedRows;
 
   const resultCountLabel = !hasSearched
     ? rows.length > MAX_RESULTS
@@ -215,6 +226,15 @@ export default function DictionaryPage() {
       const next = [...prev];
       next[ci] = !next[ci];
       return next;
+    });
+  };
+
+  const toggleSort = (ci: number) => {
+    setSortState((prev) => {
+      if (!prev || prev.col !== ci) {
+        return { col: ci, direction: "asc" };
+      }
+      return { col: ci, direction: prev.direction === "asc" ? "desc" : "asc" };
     });
   };
 
@@ -242,6 +262,7 @@ export default function DictionaryPage() {
       setResultExceeded(false);
       setSearchText("");
       setSelectedDic("");
+      setSortState(null);
     } catch (err) {
       setLoadError(
         `ファイルの読み込みに失敗しました: ${err instanceof Error ? err.message : String(err)}`
@@ -293,7 +314,7 @@ export default function DictionaryPage() {
               <span className="font-semibold">ナンクロ</span>：完全一致で検索します。<code className="bg-white px-1 rounded border">.</code>は任意の1文字、<code className="bg-white px-1 rounded border">*</code>は0文字以上の任意の文字列、<code className="bg-white px-1 rounded border">1</code>から<code className="bg-white px-1 rounded border">9</code>は任意の1文字で、同じ数字は同じ文字に一致します。<code className="bg-white px-1 rounded border">[あいう]</code>は括弧内のどれか1文字に一致します。数字そのものは検索できません。
             </li>
             <li>カラム見出しをクリックすると、そのカラムだけを検索対象に絞れます（複数選択可）。</li>
-            <li>カラム見出し右端の <span className="inline-block align-middle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline h-4 w-4"><rect x="9" y="9" width="10" height="10" rx="2"/><path d="M5 15V7a2 2 0 0 1 2-2h8"/></svg></span> アイコンを押すと、現在表示中のその列の値をクリップボードにコピーします。</li>
+            <li>カラム見出し右側のボタンで、左は現在表示中データの並び替え、右は現在表示中のその列の値をコピーできます。</li>
             <li>「全選択」で全カラムを選択、もう一度押すと全解除します。</li>
           </ol>
         </div>
@@ -417,6 +438,13 @@ export default function DictionaryPage() {
           >
             {hasAnySelected ? "全解除" : "全選択"}
           </button>
+          <button
+            onClick={() => setSortState(null)}
+            disabled={!sortState}
+            className="bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400 px-4 py-1.5 rounded transition-colors text-sm font-semibold"
+          >
+            並び替えを戻す
+          </button>
         </div>
       )}
 
@@ -449,38 +477,65 @@ export default function DictionaryPage() {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span>{h}</span>
-                      <button
-                        type="button"
-                        aria-label={`${h}列をコピー`}
-                        title={`${h}列をコピー`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSingleColCopy(ci);
-                        }}
-                        className="rounded p-0.5 hover:bg-black/10"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          className="h-4 w-4"
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          aria-label={`${h}列で並び替え`}
+                          title={`${h}列で並び替え`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSort(ci);
+                          }}
+                          className={`rounded p-0.5 hover:bg-black/10 ${
+                            sortState?.col === ci ? "bg-black/10" : ""
+                          }`}
                         >
-                          <rect x="9" y="9" width="10" height="10" rx="2" />
-                          <path d="M5 15V7a2 2 0 0 1 2-2h8" />
-                        </svg>
-                      </button>
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            className="h-4 w-4"
+                          >
+                            <path d="m8 7 4-4 4 4" />
+                            <path d="M12 3v18" />
+                            <path d="m8 17 4 4 4-4" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`${h}列をコピー`}
+                          title={`${h}列をコピー`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSingleColCopy(ci);
+                          }}
+                          className="rounded p-0.5 hover:bg-black/10"
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            className="h-4 w-4"
+                          >
+                            <rect x="9" y="9" width="10" height="10" rx="2" />
+                            <path d="M5 15V7a2 2 0 0 1 2-2h8" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {displayedRows.map(({ row, ri }) => (
+              {displayedRows.map(({ row, ri }, displayIndex) => (
                 <tr
                   key={ri}
-                  className={ri % 2 === 0 ? "bg-white" : "bg-gray-50"}
+                  className={displayIndex % 2 === 0 ? "bg-white" : "bg-gray-50"}
                 >
                   {headers.map((_, ci) => (
                     <td
