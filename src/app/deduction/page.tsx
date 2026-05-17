@@ -31,6 +31,15 @@ export default function DeductionPage() {
   const [input, setInput] = useState("");
   const [result, setResult] = useState<SolveResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sortState, setSortState] = useState<{ col: number; direction: "asc" | "desc" } | null>(null);
+
+  const toggleSort = (ci: number) => {
+    setSortState((prev) => {
+      if (!prev || prev.col !== ci) return { col: ci, direction: "asc" };
+      if (prev.direction === "asc") return { col: ci, direction: "desc" };
+      return null;
+    });
+  };
 
   const formatErrorMessage = (message: string): string => {
     const match = message.match(/^L(\d+):\s*(.*)$/);
@@ -59,6 +68,7 @@ export default function DeductionPage() {
   }, [result]);
 
   const handleSolve = () => {
+    setSortState(null);
     try {
       const solved = solvePuzzle(input, 100);
       setResult(solved);
@@ -74,6 +84,7 @@ export default function DeductionPage() {
     setInput("");
     setResult(null);
     setError(null);
+    setSortState(null);
   };
 
   return (
@@ -380,33 +391,69 @@ C=正直:B=犯人`}
 
           <div className="text-sm font-semibold">解の件数: {solutionCountText}</div>
 
-          {result.solutions.map((rows, index) => (
-            <div key={index} className="border rounded p-3 overflow-auto">
-              <h3 className="font-bold mb-2">解 {index + 1}</h3>
-              <table className="min-w-full border text-sm">
-                <thead>
-                  <tr className="bg-gray-100">
-                    {result.categories.map((category) => (
-                      <th key={category.name} className="border px-2 py-1 text-left">
-                        {category.name}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, rowIndex) => (
-                    <tr key={rowIndex}>
-                      {row.map((cell, cellIndex) => (
-                        <td key={`${rowIndex}-${cellIndex}`} className="border px-2 py-1">
-                          {cell}
-                        </td>
+          {result.solutions.map((rows, index) => {
+            const sortedRows = sortState
+              ? [...rows].sort((a, b) => {
+                  const category = result.categories[sortState.col];
+                  const aIdx = category.values.indexOf(a[sortState.col] ?? "");
+                  const bIdx = category.values.indexOf(b[sortState.col] ?? "");
+                  return sortState.direction === "asc" ? aIdx - bIdx : bIdx - aIdx;
+                })
+              : rows;
+            return (
+              <div key={index} className="border rounded p-3 overflow-auto">
+                <h3 className="font-bold mb-2">解 {index + 1}</h3>
+                <table className="w-auto border text-sm">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      {result.categories.map((category, ci) => (
+                        <th key={category.name} className="border px-2 py-1 text-left whitespace-nowrap">
+                          <div className="flex items-center gap-1">
+                            <span>{category.name}</span>
+                            <button
+                              type="button"
+                              aria-label={`${category.name}列で並び替え`}
+                              title={`${category.name}列で並び替え`}
+                              onClick={() => toggleSort(ci)}
+                              className={`rounded p-0.5 hover:bg-black/10 ${sortState?.col === ci ? "bg-black/10" : ""}`}
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                className="h-4 w-4"
+                              >
+                                {sortState?.col === ci && sortState.direction === "asc" ? (
+                                  <path d="m8 7 4-4 4 4M12 3v18" />
+                                ) : sortState?.col === ci && sortState.direction === "desc" ? (
+                                  <path d="m8 17 4 4 4-4M12 21V3" />
+                                ) : (
+                                  <><path d="m8 7 4-4 4 4" /><path d="M12 3v18" /><path d="m8 17 4 4 4-4" /></>
+                                )}
+                              </svg>
+                            </button>
+                          </div>
+                        </th>
                       ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
+                  </thead>
+                  <tbody>
+                    {sortedRows.map((row, rowIndex) => (
+                      <tr key={rowIndex}>
+                        {row.map((cell, cellIndex) => (
+                          <td key={`${rowIndex}-${cellIndex}`} className="border px-2 py-1 whitespace-nowrap">
+                            {cell}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
         </section>
       )}
     </main>
