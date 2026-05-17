@@ -32,6 +32,7 @@ export default function DeductionPage() {
   const [result, setResult] = useState<SolveResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sortState, setSortState] = useState<{ col: number; direction: "asc" | "desc" } | null>(null);
+  const [aggregateCategoryIndex, setAggregateCategoryIndex] = useState<number | null>(null);
 
   const toggleSort = (ci: number) => {
     setSortState((prev) => {
@@ -67,8 +68,61 @@ export default function DeductionPage() {
     return `${result.solutions.length}件`;
   }, [result]);
 
+  const aggregatedRows = useMemo(() => {
+    if (!result || aggregateCategoryIndex === null) {
+      return null;
+    }
+
+    const groupMap = new Map<string, Array<Set<string>>>();
+    const categoryCount = result.categories.length;
+
+    result.solutions.forEach((solutionRows) => {
+      solutionRows.forEach((row) => {
+        const key = row[aggregateCategoryIndex] ?? "";
+        if (!groupMap.has(key)) {
+          groupMap.set(
+            key,
+            Array.from({ length: categoryCount }, () => new Set<string>())
+          );
+        }
+        const valueSets = groupMap.get(key)!;
+        for (let ci = 0; ci < categoryCount; ci++) {
+          if (ci === aggregateCategoryIndex) continue;
+          valueSets[ci].add(row[ci] ?? "");
+        }
+      });
+    });
+
+    const aggregateCategory = result.categories[aggregateCategoryIndex];
+    const aggregateValues = [
+      ...aggregateCategory.values.filter((value) => groupMap.has(value)),
+      ...[...groupMap.keys()].filter(
+        (value) => !aggregateCategory.values.includes(value)
+      ),
+    ];
+
+    return aggregateValues.map((aggregateValue) => {
+      const valueSets = groupMap.get(aggregateValue);
+      const cells = result.categories.map((category, ci) => {
+        if (ci === aggregateCategoryIndex) return aggregateValue;
+        const values = [...(valueSets?.[ci] ?? new Set<string>())];
+        values.sort((a, b) => {
+          const ai = category.values.indexOf(a);
+          const bi = category.values.indexOf(b);
+          if (ai === -1 && bi === -1) return a.localeCompare(b, "ja");
+          if (ai === -1) return 1;
+          if (bi === -1) return -1;
+          return ai - bi;
+        });
+        return values.join("\n");
+      });
+      return cells;
+    });
+  }, [result, aggregateCategoryIndex]);
+
   const handleSolve = () => {
     setSortState(null);
+    setAggregateCategoryIndex(null);
     try {
       const solved = solvePuzzle(input, 100);
       setResult(solved);
@@ -85,6 +139,7 @@ export default function DeductionPage() {
     setResult(null);
     setError(null);
     setSortState(null);
+    setAggregateCategoryIndex(null);
   };
 
   return (
@@ -115,6 +170,8 @@ export default function DeductionPage() {
             setInput(SAMPLE_INPUT_1);
             setResult(null);
             setError(null);
+            setSortState(null);
+            setAggregateCategoryIndex(null);
           }}
         >
           サンプル1
@@ -125,6 +182,8 @@ export default function DeductionPage() {
             setInput(SAMPLE_INPUT_2);
             setResult(null);
             setError(null);
+            setSortState(null);
+            setAggregateCategoryIndex(null);
           }}
         >
           サンプル2
@@ -391,7 +450,64 @@ C=正直:B=犯人`}
 
           <div className="text-sm font-semibold">解の件数: {solutionCountText}</div>
 
-          {result.solutions.map((rows, index) => {
+          {result.solutions.length >= 2 && (
+            <div className="flex flex-wrap items-center gap-2 border rounded p-2 bg-gray-50">
+              <span className="text-sm font-semibold">集約:</span>
+              <button
+                type="button"
+                onClick={() => setAggregateCategoryIndex(null)}
+                className={`px-3 py-1 rounded text-sm border ${
+                  aggregateCategoryIndex === null
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-white hover:bg-gray-100"
+                }`}
+              >
+                集約解除
+              </button>
+              {result.categories.map((category, ci) => (
+                <button
+                  key={category.name}
+                  type="button"
+                  onClick={() => setAggregateCategoryIndex(ci)}
+                  className={`px-3 py-1 rounded text-sm border ${
+                    aggregateCategoryIndex === ci
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "bg-white hover:bg-gray-100"
+                  }`}
+                >
+                  {category.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {aggregateCategoryIndex !== null && aggregatedRows ? (
+            <div className="border rounded p-3 overflow-auto">
+              <h3 className="font-bold mb-2">集約結果（{result.categories[aggregateCategoryIndex].name}）</h3>
+              <table className="w-auto border text-sm">
+                <thead>
+                  <tr className="bg-gray-100">
+                    {[aggregateCategoryIndex, ...result.categories.map((_, i) => i).filter((i) => i !== aggregateCategoryIndex)].map((ci) => (
+                      <th key={result.categories[ci].name} className="border px-2 py-1 text-left whitespace-nowrap">
+                        {result.categories[ci].name}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {aggregatedRows.map((row, rowIndex) => (
+                    <tr key={rowIndex}>
+                      {[aggregateCategoryIndex, ...result.categories.map((_, i) => i).filter((i) => i !== aggregateCategoryIndex)].map((ci) => (
+                        <td key={`${rowIndex}-${ci}`} className="border px-2 py-1 whitespace-pre-line align-top">
+                          {row[ci]}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : result.solutions.map((rows, index) => {
             const sortedRows = sortState
               ? [...rows].sort((a, b) => {
                   const category = result.categories[sortState.col];
