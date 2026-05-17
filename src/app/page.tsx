@@ -52,40 +52,6 @@ export default function Home() {
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-8">
       <h1 className="text-4xl font-bold mb-8">Riddle Tools</h1>
-<<<<<<< HEAD
-      <ul className="space-y-6 w-full max-w-md">
-        <li>
-          <Link href="/count" className="block bg-blue-100 hover:bg-blue-200 text-blue-900 font-semibold rounded px-6 py-4 shadow">
-            文字数カウントツール
-          </Link>
-        </li>
-        <li>
-          <Link href="/compare" className="block bg-green-100 hover:bg-green-200 text-green-900 font-semibold rounded px-6 py-4 shadow">
-            文字比較ツール
-          </Link>
-        </li>
-        <li>
-          <Link href="/pick" className="block bg-purple-100 hover:bg-purple-200 text-purple-900 font-semibold rounded px-6 py-4 shadow">
-            文字拾いツール
-          </Link>
-        </li>
-        <li>
-          <Link href="/shiritori" className="block bg-yellow-100 hover:bg-yellow-200 text-yellow-900 font-semibold rounded px-6 py-4 shadow">
-            しりとりソルバー
-          </Link>
-        </li>
-        <li>
-          <Link href="/skeleton" className="block bg-orange-100 hover:bg-orange-200 text-orange-900 font-semibold rounded px-6 py-4 shadow">
-            スケルトンソルバー
-          </Link>
-        </li>
-        <li>
-          <Link href="/maze" className="block bg-red-100 hover:bg-red-200 text-red-900 font-semibold rounded px-6 py-4 shadow">
-            迷路ソルバー
-          </Link>
-        </li>
-      </ul>
-=======
       
       <div className="w-full max-w-4xl grid md:grid-cols-2 gap-8">
         {/* ツール */}
@@ -148,7 +114,6 @@ export default function Home() {
           </ul>
         </div>
       </div>
->>>>>>> main
     </main>
   );
 }
