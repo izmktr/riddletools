@@ -1,0 +1,558 @@
+"use client";
+import { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
+import { matchAnagram, matchNankuro } from "./search";
+
+type DicEntry = { name: string; file: string };
+
+function parseCSV(text: string): string[][] {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== "")
+    .map((line) =>
+      line.split(",").map((cell) => cell.trim())
+    );
+}
+
+async function fetchCsvText(url: string, label: string): Promise<string> {
+  const res = await fetch(url);
+  const text = await res.text();
+
+  if (!res.ok) {
+    const bodyPreview = text.trim().slice(0, 200);
+    throw new Error(
+      [
+        `${label} の読み込みに失敗しました`,
+        `URL: ${url}`,
+        `HTTP: ${res.status} ${res.statusText}`,
+        `Content-Type: ${res.headers.get("content-type") ?? "unknown"}`,
+        bodyPreview ? `Response: ${bodyPreview}` : "Response: (empty)",
+      ].join("\n")
+    );
+  }
+
+  return text;
+}
+
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+
+export default function DictionaryPage() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showHelp, setShowHelp] = useState(false);
+  const [searchType, setSearchType] = useState<"partial" | "regex" | "anagram" | "nankuro">("partial");
+  const [searchText, setSearchText] = useState("");
+  const [dicList, setDicList] = useState<DicEntry[]>([]);
+  const [selectedDic, setSelectedDic] = useState<string>("");
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [rows, setRows] = useState<string[][]>([]);
+  const [selectedCols, setSelectedCols] = useState<boolean[]>([]);
+  const [matchedCells, setMatchedCells] = useState<Set<string>>(new Set());
+  const [hasSearched, setHasSearched] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [resultExceeded, setResultExceeded] = useState(false);
+  const [sortState, setSortState] = useState<{ col: number; direction: "asc" | "desc" } | null>(null);
+  const MAX_RESULTS = 50;
+
+  // dic/index.csv を読み込む
+  useEffect(() => {
+    const indexUrl = `${BASE_PATH}/dic/index.csv`;
+
+    fetchCsvText(indexUrl, "index.csv")
+      .then((text) => {
+        const parsed = parseCSV(text);
+        const entries: DicEntry[] = parsed
+          .filter((row) => row.length >= 2)
+          .map((row) => ({ name: row[0], file: row[1] }));
+
+        if (entries.length === 0) {
+          setLoadError(
+            [
+              "index.csv は読み込めましたが、有効な辞書エントリが見つかりませんでした",
+              `URL: ${indexUrl}`,
+              `BASE_PATH: ${BASE_PATH || "(empty)"}`,
+              text.trim()
+                ? `先頭データ: ${text.trim().split(/\r?\n/).slice(0, 5).join(" | ")}`
+                : "先頭データ: (empty)",
+            ].join("\n")
+          );
+          setDicList([]);
+          return;
+        }
+
+        setDicList(entries);
+        setLoadError(null);
+      })
+      .catch((e) => {
+        setLoadError(
+          [
+            e instanceof Error ? e.message : `index.csv の読み込みに失敗しました: ${String(e)}`,
+            `BASE_PATH: ${BASE_PATH || "(empty)"}`,
+            `location.pathname: ${typeof window !== "undefined" ? window.location.pathname : "(server)"}`,
+          ].join("\n")
+        );
+        setDicList([]);
+      });
+  }, []);
+
+  // 辞書ファイルを読み込む
+  useEffect(() => {
+    if (!selectedDic) return;
+    setLoadError(null);
+    fetchCsvText(`${BASE_PATH}/dic/${selectedDic}`, `辞書ファイル ${selectedDic}`)
+      .then((text) => {
+        const parsed = parseCSV(text);
+        if (parsed.length === 0) {
+          setLoadError("辞書ファイルが空です");
+          setHeaders([]);
+          setRows([]);
+          return;
+        }
+        const [header, ...dataRows] = parsed;
+        setHeaders(header);
+        setRows(dataRows);
+        setSelectedCols(new Array(header.length).fill(false));
+        setMatchedCells(new Set());
+        setHasSearched(false);
+        setResultExceeded(false);
+        setSearchText("");
+        setSortState(null);
+      })
+      .catch((e) => {
+        setLoadError(`辞書ファイルの読み込みに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+        setHeaders([]);
+        setRows([]);
+      });
+  }, [selectedDic]);
+
+  // 検索実行
+  const handleSearch = useCallback(() => {
+    setHasSearched(true);
+    setResultExceeded(false);
+    if (searchText.trim() === "") {
+      setMatchedCells(new Set());
+      setHasSearched(false);
+      return;
+    }
+    const activeCols =
+      selectedCols.every((v) => !v)
+        ? headers.map(() => true)
+        : selectedCols;
+
+    const matched = new Set<string>();
+    let matchedRowCount = 0;
+    let exceeded = false;
+    for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+      const row = rows[rowIdx];
+      let rowHit = false;
+      for (let ci = 0; ci < headers.length; ci++) {
+        if (!activeCols[ci]) continue;
+        const cell = row[ci] ?? "";
+        let hit = false;
+        if (searchType === "partial") {
+          hit = cell.includes(searchText);
+        } else if (searchType === "anagram") {
+          hit = matchAnagram(searchText, cell);
+        } else if (searchType === "nankuro") {
+          hit = matchNankuro(searchText, cell);
+        } else {
+          try {
+            const re = new RegExp(searchText);
+            hit = re.test(cell);
+          } catch {
+            hit = false;
+          }
+        }
+        if (hit) {
+          matched.add(`${rowIdx}-${ci}`);
+          rowHit = true;
+        }
+      }
+      if (rowHit) {
+        matchedRowCount++;
+        if (matchedRowCount > MAX_RESULTS) {
+          exceeded = true;
+          break;
+        }
+      }
+    }
+    setResultExceeded(exceeded);
+    setMatchedCells(matched);
+  }, [searchText, searchType, selectedCols, headers, rows]);
+
+  // 無選択なら全選択 / 1つでも選択中なら全解除
+  const hasAnySelected = selectedCols.some((v) => v);
+  const handleSelectAll = () => {
+    if (hasAnySelected) {
+      setSelectedCols(new Array(headers.length).fill(false));
+    } else {
+      setSelectedCols(new Array(headers.length).fill(true));
+    }
+  };
+
+  const visibleRows = rows
+    .map((row, ri) => ({ row, ri }))
+    .filter(({ ri }) => {
+      if (!hasSearched) return ri < MAX_RESULTS;
+      return headers.some((_, ci) => matchedCells.has(`${ri}-${ci}`));
+    });
+
+  const baseDisplayedRows = visibleRows.slice(0, MAX_RESULTS);
+
+  const displayedRows = sortState
+    ? [...baseDisplayedRows].sort((a, b) => {
+      const left = a.row[sortState.col] ?? "";
+      const right = b.row[sortState.col] ?? "";
+      const compared = left.localeCompare(right, "ja", { numeric: true, sensitivity: "base" });
+      return sortState.direction === "asc" ? compared : -compared;
+    })
+    : baseDisplayedRows;
+
+  const resultCountLabel = !hasSearched
+    ? rows.length > MAX_RESULTS
+      ? `表示${displayedRows.length}件（全${rows.length}件）`
+      : `全${rows.length}件`
+    : resultExceeded
+      ? `${MAX_RESULTS}件以上`
+      : `${displayedRows.length}件`;
+
+  const handleSingleColCopy = (ci: number) => {
+    const lines = displayedRows.map(({ row }) => row[ci] ?? "");
+    navigator.clipboard.writeText(lines.join("\n")).catch(() => {});
+  };
+
+  // カラムタイトルのトグル
+  const toggleCol = (ci: number) => {
+    setSelectedCols((prev) => {
+      const next = [...prev];
+      next[ci] = !next[ci];
+      return next;
+    });
+  };
+
+  const toggleSort = (ci: number) => {
+    setSortState((prev) => {
+      if (!prev || prev.col !== ci) {
+        return { col: ci, direction: "asc" };
+      }
+      return { col: ci, direction: prev.direction === "asc" ? "desc" : "asc" };
+    });
+  };
+
+  // ローカルCSVファイルを読み込む
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLoadError(null);
+    try {
+      const text = await file.text();
+      const parsed = parseCSV(text);
+      if (parsed.length === 0) {
+        setLoadError("ファイルが空です");
+        setHeaders([]);
+        setRows([]);
+        return;
+      }
+      const [header, ...dataRows] = parsed;
+      setHeaders(header);
+      setRows(dataRows);
+      setSelectedCols(new Array(header.length).fill(false));
+      setMatchedCells(new Set());
+      setHasSearched(false);
+      setResultExceeded(false);
+      setSearchText("");
+      setSelectedDic("");
+      setSortState(null);
+    } catch (err) {
+      setLoadError(
+        `ファイルの読み込みに失敗しました: ${err instanceof Error ? err.message : String(err)}`
+      );
+      setHeaders([]);
+      setRows([]);
+    }
+
+    // input をリセット（同じファイルを再度選択できるように）
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, []);
+
+
+  return (
+    <main className="min-h-screen p-6 max-w-5xl mx-auto">
+      <div className="mb-4">
+        <Link href="/" className="text-blue-600 hover:underline text-sm">
+          ← トップへ戻る
+        </Link>
+      </div>
+      <div className="flex items-center gap-3 mb-6">
+        <h1 className="text-2xl font-bold">検索・辞書</h1>
+        <button
+          onClick={() => setShowHelp((v) => !v)}
+          className="text-sm border rounded px-3 py-1 hover:bg-gray-100 transition-colors"
+        >
+          {showHelp ? "閉じる" : "使い方"}
+        </button>
+      </div>
+
+      {showHelp && (
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded text-sm leading-relaxed">
+          <h2 className="font-bold mb-2">使い方</h2>
+          <ol className="list-decimal list-inside space-y-1.5">
+            <li>「辞書選択」で使いたい辞書を選びます。</li>
+            <li>検索ワードを入力して「検索」ボタン（またはEnterキー）を押すと、ヒットした行がハイライト表示されます。</li>
+            <li>
+              <span className="font-semibold">部分一致</span>：入力文字列が含まれる行を検索します。
+            </li>
+            <li>
+              <span className="font-semibold">正規表現</span>：正規表現パターンで検索します。例: <code className="bg-white px-1 rounded border">^あ</code>
+            </li>
+            <li>
+              <span className="font-semibold">アナグラム</span>：文字の並び替えで一致する行を検索します。<code className="bg-white px-1 rounded border">.</code>は任意の1文字、<code className="bg-white px-1 rounded border">[あいう]</code>はいずれか1文字にマッチします。
+            </li>
+            <li>
+              <span className="font-semibold">ナンクロ</span>：完全一致で検索します。<code className="bg-white px-1 rounded border">.</code>は任意の1文字、<code className="bg-white px-1 rounded border">*</code>は0文字以上の任意の文字列、<code className="bg-white px-1 rounded border">1</code>から<code className="bg-white px-1 rounded border">9</code>は任意の1文字で、同じ数字は同じ文字に一致します。<code className="bg-white px-1 rounded border">[あいう]</code>は括弧内のどれか1文字に一致します。数字そのものは検索できません。
+            </li>
+            <li>カラム見出しをクリックすると、そのカラムだけを検索対象に絞れます（複数選択可）。</li>
+            <li>カラム見出し右側のボタンで、左は現在表示中データの並び替え、右は現在表示中のその列の値をコピーできます。</li>
+            <li>「全選択」で全カラムを選択、もう一度押すと全解除します。</li>
+          </ol>
+        </div>
+      )}
+
+      {/* 検索エリア */}
+      <div className="flex flex-col gap-3 mb-4">
+        {/* 区分 */}
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input
+              type="radio"
+              name="searchType"
+              value="partial"
+              checked={searchType === "partial"}
+              onChange={() => setSearchType("partial")}
+            />
+            部分一致
+          </label>
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input
+              type="radio"
+              name="searchType"
+              value="regex"
+              checked={searchType === "regex"}
+              onChange={() => setSearchType("regex")}
+            />
+            正規表現
+          </label>
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input
+              type="radio"
+              name="searchType"
+              value="anagram"
+              checked={searchType === "anagram"}
+              onChange={() => setSearchType("anagram")}
+            />
+            アナグラム
+          </label>
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input
+              type="radio"
+              name="searchType"
+              value="nankuro"
+              checked={searchType === "nankuro"}
+              onChange={() => setSearchType("nankuro")}
+            />
+            ナンクロ
+          </label>
+        </div>
+
+        {/* 検索テキスト + ボタン */}
+        <div className="flex items-center gap-3">
+          <input
+            type="text"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
+            placeholder="検索単語を入力"
+            className="border rounded px-3 py-1.5 w-52 focus:outline-none focus:ring-2 focus:ring-blue-400"
+          />
+          <button
+            onClick={handleSearch}
+            className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-1.5 rounded transition-colors"
+          >
+            検索
+          </button>
+          <button
+            onClick={() => { setSearchText(""); setMatchedCells(new Set()); setHasSearched(false); setResultExceeded(false); }}
+            className="bg-gray-200 hover:bg-gray-300 px-4 py-1.5 rounded transition-colors"
+          >
+            リセット
+          </button>
+        </div>
+      </div>
+
+      {/* 辞書選択 */}
+      <div className="flex items-center gap-3 mb-4">
+        <label className="font-semibold">辞書選択</label>
+        <select
+          value={selectedDic}
+          onChange={(e) => setSelectedDic(e.target.value)}
+          className="border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400"
+        >
+          <option value="">-- 辞書を選択してください --</option>
+          {dicList.map((d) => (
+            <option key={d.file} value={d.file}>
+              {d.name}
+            </option>
+          ))}
+        </select>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,.txt"
+          onChange={handleFileSelect}
+          className="hidden"
+          aria-label="CSVファイルを選択"
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="bg-gray-200 hover:bg-gray-300 px-4 py-1.5 rounded transition-colors text-sm font-semibold"
+        >
+          CSVを開く
+        </button>
+      </div>
+
+      {/* エラー表示 */}
+      {loadError && (
+        <div className="mb-4 px-4 py-2 bg-red-100 text-red-700 border border-red-300 rounded whitespace-pre-wrap break-words">
+          {loadError}
+        </div>
+      )}
+
+      {/* 全選択ボタン */}
+      {headers.length > 0 && (
+        <div className="flex gap-3 mb-3">
+          <button
+            onClick={handleSelectAll}
+            className="bg-gray-200 hover:bg-gray-300 px-4 py-1.5 rounded transition-colors text-sm font-semibold"
+          >
+            {hasAnySelected ? "全解除" : "全選択"}
+          </button>
+          <button
+            onClick={() => setSortState(null)}
+            disabled={!sortState}
+            className="bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400 px-4 py-1.5 rounded transition-colors text-sm font-semibold"
+          >
+            並び替えを戻す
+          </button>
+        </div>
+      )}
+
+      {/* 最大件数超過警告 */}
+      {resultExceeded && (
+        <div className="mb-3 px-4 py-2 bg-yellow-100 text-yellow-800 border border-yellow-300 rounded">
+          最大件数を超えました（先頭50件のみ表示）
+        </div>
+      )}
+
+      {headers.length > 0 && (
+        <div className="mb-2 text-sm text-gray-600">{resultCountLabel}</div>
+      )}
+
+      {/* 辞書テーブル */}
+      {headers.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="border-collapse text-sm">
+            <thead>
+              <tr>
+                {headers.map((h, ci) => (
+                  <th
+                    key={ci}
+                    onClick={() => toggleCol(ci)}
+                    className={`border px-1.5 py-1 cursor-pointer select-none transition-colors whitespace-nowrap min-w-[4em] ${
+                      selectedCols[ci]
+                        ? "bg-blue-400 text-white"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span>{h}</span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          aria-label={`${h}列で並び替え`}
+                          title={`${h}列で並び替え`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSort(ci);
+                          }}
+                          className={`rounded p-0.5 hover:bg-black/10 ${
+                            sortState?.col === ci ? "bg-black/10" : ""
+                          }`}
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            className="h-4 w-4"
+                          >
+                            <path d="m8 7 4-4 4 4" />
+                            <path d="M12 3v18" />
+                            <path d="m8 17 4 4 4-4" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`${h}列をコピー`}
+                          title={`${h}列をコピー`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSingleColCopy(ci);
+                          }}
+                          className="rounded p-0.5 hover:bg-black/10"
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            className="h-4 w-4"
+                          >
+                            <rect x="9" y="9" width="10" height="10" rx="2" />
+                            <path d="M5 15V7a2 2 0 0 1 2-2h8" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {displayedRows.map(({ row, ri }, displayIndex) => (
+                <tr
+                  key={ri}
+                  className={displayIndex % 2 === 0 ? "bg-white" : "bg-gray-50"}
+                >
+                  {headers.map((_, ci) => (
+                    <td
+                      key={ci}
+                      className={`border px-1.5 py-1 whitespace-nowrap min-w-[4em]${
+                        matchedCells.has(`${ri}-${ci}`) ? " bg-yellow-200" : ""
+                      }`}
+                    >
+                      {row[ci] ?? ""}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </main>
+  );
+}

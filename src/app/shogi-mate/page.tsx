@@ -1,0 +1,2104 @@
+"use client";
+import { useState, useEffect } from "react";
+import Link from "next/link";
+
+type PieceType = '歩' | '香' | '桂' | '銀' | '金' | '王' | '玉' | '飛' | '角' | 'と' | '成香' | '成桂' | '成銀' | '龍' | '馬' | null;
+type Side = 'self' | 'opponent' | null;
+type Status = 'none' | 'success' | 'failure' | 'done';
+
+interface Piece {
+  type: PieceType;
+  side: Side;
+}
+
+const PIECE_TYPES: PieceType[] = ['歩', '香', '桂', '銀', '金', '王', '飛', '角'];
+
+// 成り駒の対応
+const PROMOTED_MAP: {[key: string]: PieceType} = {
+  '歩': 'と',
+  '香': '成香',
+  '桂': '成桂',
+  '銀': '成銀',
+  '飛': '龍',
+  '角': '馬',
+};
+
+// 成り駒から元の駒への逆引き
+const UNPROMOTED_MAP: {[key: string]: PieceType} = {
+  'と': '歩',
+  '成香': '香',
+  '成桂': '桂',
+  '成銀': '銀',
+  '龍': '飛',
+  '馬': '角',
+};
+
+// 遠距離ユニット
+const LONG_RANGE_PIECES: PieceType[] = ['飛', '角', '龍', '馬', '香'];
+
+// 数字を漢数字に変換
+const KANJI_NUMBERS = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+
+export default function ShogiMatePage() {
+  const [board, setBoard] = useState<(Piece | null)[][]>(() => 
+    Array(9).fill(null).map(() => Array(9).fill(null))
+  );
+  const [selectedCell, setSelectedCell] = useState<{row: number, col: number} | null>(null);
+  const [capturedPieces, setCapturedPieces] = useState<PieceType[]>([]);
+  const [selectedCapturedIndex, setSelectedCapturedIndex] = useState<number | null>(null);
+  const [showExport, setShowExport] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [exportText, setExportText] = useState("");
+  const [importText, setImportText] = useState("");
+  const [solutionSteps, setSolutionSteps] = useState<string[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [viewMode, setViewMode] = useState(false);
+  const [initialField, setInitialField] = useState<Field | null>(null);
+  const [rootMoves, setRootMoves] = useState<MovePiece[]>([]);
+  const [currentPath, setCurrentPath] = useState<MovePiece[]>([]);
+  const [solutionPath, setSolutionPath] = useState<MovePiece[] | null>(null);
+  const [selectedPieceInView, setSelectedPieceInView] = useState<Coordinate | PieceType | null>(null);
+  const [selectedDestination, setSelectedDestination] = useState<Coordinate | null>(null);
+  const [analysisProgress, setAnalysisProgress] = useState<{queueSize: number, maxDepth: number} | null>(null);
+
+  // ページタイトルを設定
+  useEffect(() => {
+    document.title = "詰将棋ソルバー | RiddleTools";
+  }, []);
+
+  // 盤面のセルをクリック
+  const handleCellClick = (row: number, col: number) => {
+    setSelectedCell({row, col});
+    setSelectedCapturedIndex(null);
+  };
+
+  // 持ち駒をクリック
+  const handleCapturedClick = (index: number) => {
+    setSelectedCapturedIndex(index);
+    setSelectedCell(null);
+  };
+
+  // 駒を配置（既に駒がある場合は上書き、同じ駒なら成り駒に）
+  const handlePlacePiece = (pieceType: PieceType, side: Side) => {
+    // 持ち駒への配置
+    if (selectedCapturedIndex !== null) {
+      if (side !== 'self') {
+        alert("持ち駒には自分の駒だけ配置できます");
+        return;
+      }
+      const newCaptured = [...capturedPieces];
+      // 成り駒は元の駒に戻して配置
+      let actualPiece = pieceType;
+      if (pieceType && pieceType in UNPROMOTED_MAP) {
+        actualPiece = UNPROMOTED_MAP[pieceType as string];
+      }
+      newCaptured[selectedCapturedIndex] = actualPiece;
+      setCapturedPieces(newCaptured);
+      // 新しい空欄を選択
+      setSelectedCapturedIndex(newCaptured.length);
+      return;
+    }
+    
+    if (!selectedCell) return;
+    
+    const {row, col} = selectedCell;
+    const currentPiece = board[row][col];
+    
+    const newBoard = board.map(r => [...r]);
+    
+    // 既に同じ駒がある場合、成り駒に変換
+    if (currentPiece && currentPiece.side === side) {
+      // 現在の駒が成り駒かどうかチェック
+      const isCurrentPromoted = currentPiece.type && currentPiece.type in UNPROMOTED_MAP;
+      const isCurrentUnpromoted = currentPiece.type && currentPiece.type in PROMOTED_MAP;
+      
+      // 配置しようとしている駒が成り駒かどうかチェック
+      const isPlacingPromoted = pieceType && pieceType in UNPROMOTED_MAP;
+      const isPlacingUnpromoted = pieceType && pieceType in PROMOTED_MAP;
+      
+      // 現在の駒と配置しようとしている駒が同じかチェック
+      let isSamePiece = currentPiece.type === pieceType;
+      
+      // 成り駒と元の駒の関係をチェック
+      if (!isSamePiece && isCurrentPromoted && isPlacingUnpromoted) {
+        isSamePiece = UNPROMOTED_MAP[currentPiece.type as string] === pieceType;
+      }
+      if (!isSamePiece && isCurrentUnpromoted && isPlacingPromoted) {
+        isSamePiece = PROMOTED_MAP[currentPiece.type as string] === pieceType;
+      }
+      
+      if (isSamePiece) {
+        // 同じ駒の場合、成り駒に変換
+        if (isCurrentUnpromoted && pieceType && pieceType in PROMOTED_MAP) {
+          // 元の駒 → 成り駒
+          const promoted = PROMOTED_MAP[pieceType as string];
+          newBoard[row][col] = { type: promoted, side };
+        } else if (isCurrentPromoted && currentPiece.type && currentPiece.type in UNPROMOTED_MAP) {
+          // 成り駒 → 元の駒（トグル）
+          const unpromoted = UNPROMOTED_MAP[currentPiece.type as string];
+          newBoard[row][col] = { type: unpromoted, side };
+        } else {
+          // 金や王（玉）は変化なし
+          newBoard[row][col] = { type: pieceType, side };
+        }
+        setBoard(newBoard);
+        return;
+      }
+    }
+    
+    // それ以外の場合は普通に配置
+    newBoard[row][col] = { type: pieceType, side };
+    setBoard(newBoard);
+  };
+
+  // 駒を削除
+  const handleDeletePiece = () => {
+    // 持ち駒の削除
+    if (selectedCapturedIndex !== null) {
+      const newCaptured = capturedPieces.filter((_, i) => i !== selectedCapturedIndex);
+      setCapturedPieces(newCaptured);
+      setSelectedCapturedIndex(null);
+      return;
+    }
+    
+    if (!selectedCell) return;
+    
+    const {row, col} = selectedCell;
+    const newBoard = board.map(r => [...r]);
+    newBoard[row][col] = null;
+    setBoard(newBoard);
+  };
+
+  // 駒の表示（相手の駒は180度回転）
+  const renderPiece = (piece: Piece | null) => {
+    if (!piece) return '';
+    
+    // 成り駒かどうか判定
+    const isPromoted = piece.type! in UNPROMOTED_MAP;
+    
+    // 相手の駒は180度回転
+    if (piece.side === 'opponent') {
+      return (
+        <span className={`inline-block ${isPromoted ? 'underline underline-offset-4' : ''}`} style={{transform: 'rotate(180deg)'}}>
+          {piece.type}
+        </span>
+      );
+    }
+    
+    return <span className={isPromoted ? 'underline underline-offset-4' : ''}>{piece.type}</span>;
+  };
+
+  // リセット
+  const handleReset = () => {
+    setBoard(Array(9).fill(null).map(() => Array(9).fill(null)));
+    setSelectedCell(null);
+    setCapturedPieces([]);
+    setSelectedCapturedIndex(null);
+    setViewMode(false);
+    setSolutionSteps([]);
+    setRootMoves([]);
+    setCurrentPath([]);
+    setSolutionPath(null);
+    setSelectedPieceInView(null);
+    setSelectedDestination(null);
+  };
+
+  // 入力に戻る
+  const handleBackToInput = () => {
+    setViewMode(false);
+    setCurrentPath([]);
+    setSolutionPath(null);
+    setRootMoves([]);
+    setSelectedPieceInView(null);
+    setSelectedDestination(null);
+  };
+
+  // 前の手に戻る
+  const handlePrevStep = () => {
+    if (currentPath.length > 0) {
+      setCurrentPath(currentPath.slice(0, -1));
+      setSelectedPieceInView(null);
+      setSelectedDestination(null);
+    }
+  };
+
+  // 0手目（初期状態）に戻る
+  const handleResetToStart = () => {
+    setCurrentPath([]);
+    setSelectedPieceInView(null);
+    setSelectedDestination(null);
+  };
+
+  // 次の手に進む（詰み筋がある場合のみ）
+  const handleNextStep = () => {
+    if (solutionPath && currentPath.length < solutionPath.length) {
+      const nextMove = solutionPath[currentPath.length];
+      setCurrentPath([...currentPath, nextMove]);
+      setSelectedPieceInView(null);
+      setSelectedDestination(null);
+    }
+  };
+
+  // 手を選択
+  const handleSelectMove = (move: MovePiece) => {
+    setCurrentPath([...currentPath, move]);
+    setSelectedPieceInView(null);
+    setSelectedDestination(null);
+  };
+
+  // エクスポート処理
+  const handleExport = () => {
+    let text = "";
+    // 盤面データ
+    for (let y = 0; y < 9; y++) {
+      for (let x = 0; x < 9; x++) {
+        const piece = board[y][x];
+        if (piece) {
+          const side = piece.side === 'self' ? 'S' : 'O';
+          text += `${x + 1} ${y + 1} ${side} ${piece.type}\n`;
+        }
+      }
+    }
+    // 持ち駒データ
+    if (capturedPieces.length > 0) {
+      text += "CAPTURED: " + capturedPieces.join(",") + "\n";
+    }
+    setExportText(text);
+    setShowExport(true);
+  };
+
+  // エクスポートテキストをコピー
+  const handleCopyExport = () => {
+    navigator.clipboard.writeText(exportText);
+    alert("コピーしました！");
+  };
+
+  // インポート処理
+  const handleImport = () => {
+    setImportText("");
+    setShowImport(true);
+  };
+
+  // インポートテキストを適用
+  const handleApplyImport = () => {
+    try {
+      const lines = importText.trim().split('\n');
+      const newBoard: (Piece | null)[][] = Array(9).fill(null).map(() => Array(9).fill(null));
+      const newCaptured: PieceType[] = [];
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        
+        if (line.startsWith('CAPTURED:')) {
+          const captured = line.substring(9).trim().split(',');
+          captured.forEach(p => {
+            const piece = p.trim() as PieceType;
+            if (piece) newCaptured.push(piece);
+          });
+        } else {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length !== 4) continue;
+          
+          const [x, y, side, pieceType] = parts;
+          const col = parseInt(x) - 1;
+          const row = parseInt(y) - 1;
+          
+          if (col >= 0 && col < 9 && row >= 0 && row < 9) {
+            newBoard[row][col] = {
+              type: pieceType as PieceType,
+              side: side === 'S' ? 'self' : 'opponent'
+            };
+          }
+        }
+      }
+
+      setBoard(newBoard);
+      setCapturedPieces(newCaptured);
+      setShowImport(false);
+      alert("インポートしました！");
+    } catch {
+      alert("インポートに失敗しました。形式を確認してください。");
+    }
+  };
+
+  // 解析処理
+  const handleAnalyze = async () => {
+    setIsAnalyzing(true);
+    setSolutionSteps([]);
+    setAnalysisProgress({ queueSize: 0, maxDepth: 0 });
+    
+    const timeoutMs = 15000; // 15秒でタイムアウト
+    const abortController = new AbortController();
+    
+    // タイムアウトタイマーを設定
+    const timeoutId = setTimeout(() => {
+      abortController.abort();
+    }, timeoutMs);
+    
+    try {
+      const result = await analyzeMateAsync(board, capturedPieces, abortController.signal, setAnalysisProgress);
+      clearTimeout(timeoutId);
+      
+      setSolutionSteps(result.steps);
+      setInitialField(result.initialField);
+      setRootMoves(result.rootMoves);
+      
+      // 常にビューモードに移行
+      setViewMode(true);
+      setCurrentPath([]);
+      
+      if (result.steps.length > 0) {
+        // 詰み筋がある場合
+        setSolutionPath(result.moves);
+        alert(`詰み発見！ ${result.steps.length}手詰`);
+      } else if (result.timedOut) {
+        // タイムアウトした場合
+        setSolutionPath(null);
+        const queueInfo = `タイムアウトしました\n\n` +
+          `探索した手数: 最大${result.maxStepReached ?? 0}手目まで\n` +
+          `残りキューサイズ: ${result.queueSize ?? 0}\n\n` +
+          `※ 現在の解析状態をビューモードで確認できます`;
+        alert(queueInfo);
+      } else {
+        // 答えがない場合
+        setSolutionPath(null);
+        alert('詰みが見つかりませんでした');
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        alert('エラーが発生しました: ' + error.message);
+      }
+    } finally {
+      setIsAnalyzing(false);
+      setAnalysisProgress(null);
+    }
+  };
+
+  function ToHash(row: number, col: number): number {
+    return row * 9 + col;
+  }
+
+  // ハッシュ値から行と列を取得
+  // 戻り値: [行(row), 列(col)]
+  function FromHash(hash: number): [number, number] {
+    return [Math.floor(hash / 9), hash % 9];
+  }
+  
+  function isEnemyField(hash: number): boolean {
+    return hash < 3 * 9;
+  }
+
+  function areAdjacent(pos1: number, pos2: number): boolean {
+    const [row1, col1] = FromHash(pos1);
+    const [row2, col2] = FromHash(pos2);
+    return Math.abs(row1 - row2) <= 1 && Math.abs(col1 - col2) <= 1;
+  }
+
+  // 座標クラス
+  class Coordinate {
+    row: number;
+    col: number;
+    constructor(row: number, col: number) {
+      this.row = row;
+      this.col = col;
+    }
+
+    // 敵の陣地か？(自分から見て)
+    isEnemyField(): boolean {
+      return this.row <= 2;
+    }
+
+    hash(): number {
+      return this.row * 9 + this.col;
+    }
+
+    static fromHash(hash: number): Coordinate {
+      return new Coordinate(Math.floor(hash / 9), hash % 9);
+    }
+
+    equals(other: Coordinate): boolean {
+      return this.row === other.row && this.col === other.col;
+    }
+
+    toString(): string {
+      return `${9 - this.col}${KANJI_NUMBERS[this.row + 1]}`;
+    }
+    
+  }
+  
+  // 手を保存するクラス
+  class MovePiece {
+    step: number;
+    piece: PieceType
+    from: number | null;
+    to: number;
+    change : boolean;
+    prevMove : MovePiece | null = null;
+    nextMove : MovePiece [] = [];
+    status: Status = 'none';
+    redirectMove : MovePiece | null = null; // 同一盤面へのリダイレクト先
+    redirectedList: MovePiece [] = [];  // 自分にリダイレクトしている手のリスト
+    successMove: MovePiece | null = null; // 成功手筋の場合の次の手
+
+    constructor(step: number, piece: PieceType, from: number | null, to: number, prevMove: MovePiece | null, change: boolean = false) {
+      this.step = step;
+      this.piece = piece;
+      this.from = from;
+      this.to = to;
+      this.change = change;
+      this.prevMove = prevMove;
+      if (prevMove) {
+        prevMove.nextMove.push(this);
+      }
+    }
+
+    IsDrop(): boolean {
+      return this.from === null;
+    }
+
+    IsSelfStep(): boolean {
+      return this.step % 2 === 0;
+    }
+
+    History(): MovePiece[] {
+      const moves: MovePiece[] = [];
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      let current: MovePiece | null = this;
+      while (current) {
+        moves.push(current);
+        current = current.prevMove;
+      }
+      return moves.reverse();
+    }
+
+    getStatus(): Status {
+      /*
+      if (this.redirectMove) {
+        return this.redirectMove.status;
+      }
+        */
+      return this.status;
+    }
+
+    isSuccess(): boolean {
+      return this.successMove !== null;
+    }
+
+    setSuccess(SuccessMove: MovePiece): void {
+      this.status = 'success';
+      this.successMove = SuccessMove;
+    }
+
+    setRedirect(move: MovePiece): void {
+      this.redirectMove = move;
+      move.redirectedList.push(this);
+    }
+
+  }
+
+  // 座標と駒タイプのペア
+  class PiecePosition {
+    position: number | null;
+    piece: PieceType;
+    constructor(position: number | null, piece: PieceType) {
+      this.position = position;
+      this.piece = piece;
+    }
+  }
+
+  // 優先度付きキュー（最小ヒープ）
+  class PriorityQueue {
+    private heap: Array<{ priority: number; data: MovePiece }> = [];
+
+    // 要素を追加
+    push(priority: number, data: MovePiece): void {
+      this.heap.push({ priority, data });
+      this.bubbleUp(this.heap.length - 1);
+    }
+
+    // 配列を一括追加（優先度を指定）
+    pushArray(priority: number, moves: MovePiece[]): void {
+      moves.forEach(move => {
+        this.push(priority, move);
+      });
+    }
+
+    // 最小優先度の要素を取り出す
+    pop(): MovePiece | undefined {
+      if (this.heap.length === 0) return undefined;
+      if (this.heap.length === 1) return this.heap.pop()!.data;
+
+      const min = this.heap[0].data;
+      this.heap[0] = this.heap.pop()!;
+      this.bubbleDown(0);
+      return min;
+    }
+
+    // 最小優先度の要素を見る（取り出さない）
+    peek(): MovePiece | undefined {
+      return this.heap.length > 0 ? this.heap[0].data : undefined;
+    }
+
+    // 先頭の要素の優先度を見る
+    peekPriority(): number {
+      return this.heap.length > 0 ? this.heap[0].priority : 0;
+    }
+
+    // 空かどうか
+    isEmpty(): boolean {
+      return this.heap.length === 0;
+    }
+
+    // サイズ
+    size(): number {
+      return this.heap.length;
+    }
+
+    // 末尾の要素のstep数を取得（最大優先度の要素）
+    getLastStep(): number | undefined {
+      if (this.heap.length === 0) return undefined;
+      // ヒープの末尾要素から最大step数を探す（効率的ではないが、正確）
+      let maxStep = this.heap[0].data.step;
+      for (let i = 1; i < this.heap.length; i++) {
+        if (this.heap[i].data.step > maxStep) {
+          maxStep = this.heap[i].data.step;
+        }
+      }
+      return maxStep;
+    }
+
+    // ヒープの上方向への調整
+    private bubbleUp(index: number): void {
+      while (index > 0) {
+        const parentIndex = Math.floor((index - 1) / 2);
+        if (this.heap[index].priority >= this.heap[parentIndex].priority) break;
+        
+        [this.heap[index], this.heap[parentIndex]] = [this.heap[parentIndex], this.heap[index]];
+        index = parentIndex;
+      }
+    }
+
+    // ヒープの下方向への調整
+    private bubbleDown(index: number): void {
+      while (true) {
+        const leftChild = 2 * index + 1;
+        const rightChild = 2 * index + 2;
+        let smallest = index;
+
+        if (leftChild < this.heap.length && this.heap[leftChild].priority < this.heap[smallest].priority) {
+          smallest = leftChild;
+        }
+        if (rightChild < this.heap.length && this.heap[rightChild].priority < this.heap[smallest].priority) {
+          smallest = rightChild;
+        }
+        if (smallest === index) break;
+
+        [this.heap[index], this.heap[smallest]] = [this.heap[smallest], this.heap[index]];
+        index = smallest;
+      }
+    }
+  }
+
+  // フィールドクラス
+  class Field{
+    opponentking: PiecePosition;
+    opponentpieces: PiecePosition[];
+    selfpieces: PiecePosition[];
+
+    // 持ち駒 (駒の種類 -> 個数)
+    capturedPieces: Map<PieceType, number>;
+
+    constructor(opponentking: PiecePosition, opponentpieces: PiecePosition[], selfpieces: PiecePosition[], capturedPieces: Map<PieceType, number> = new Map()) {
+      this.opponentking = opponentking;
+      this.opponentpieces = opponentpieces;
+      this.selfpieces = selfpieces;
+      this.capturedPieces = capturedPieces;
+    }
+
+    
+
+    // フィールドのコピーを作成
+    clone(): Field {
+      const clonePiecePosition = (pp: PiecePosition): PiecePosition => {
+        return new PiecePosition(pp.position, pp.piece);
+      };
+      
+      const newOpponentKing = clonePiecePosition(this.opponentking);
+      const newOpponentPieces = this.opponentpieces.map(pp => clonePiecePosition(pp));
+      const newSelfPieces = this.selfpieces.map(pp => clonePiecePosition(pp));
+      const newCapturedPieces = new Map(this.capturedPieces);
+      
+      return new Field(newOpponentKing, newOpponentPieces, newSelfPieces, newCapturedPieces);
+    }
+
+    // 手を進める
+    static advanceStepField(field: Field, moveArray: MovePiece[]): Field {
+      const newField = field.clone();
+
+      // 手順を逆順に適用
+      for (let i = 0; i < moveArray.length; i++) {
+        const mv = moveArray[i];
+        
+        if (mv.IsDrop()) {
+          // 持ち駒から打つ
+          if (mv.IsSelfStep()) {
+            newField.selfpieces.push(new PiecePosition(mv.to, mv.piece));
+            const count = newField.capturedPieces.get(mv.piece) || 0;
+            if (count > 1) {
+              newField.capturedPieces.set(mv.piece, count - 1);
+            } else {
+              newField.capturedPieces.delete(mv.piece);
+            }
+          }else{
+            newField.opponentpieces.push(new PiecePosition(mv.to, mv.piece));
+          }
+    } else {
+          // 盤上の駒を移動
+          // 移動元の駒を削除
+
+          const current = mv.IsSelfStep() ? newField.selfpieces : newField.opponentpieces;
+          const opponent = mv.IsSelfStep() ? newField.opponentpieces : newField.selfpieces;
+
+          const fromIndex = current.findIndex(
+            pp => pp.position === mv.from
+          );
+          if (fromIndex !== -1) {
+            current[fromIndex].position = mv.to;
+            if (mv.change){
+              current[fromIndex].piece = mv.piece;
+            }
+          }
+          
+          // 移動先に相手の駒がある場合、取る
+          const opponentIndex = opponent.findIndex(
+            pp => pp.position === mv.to
+          );
+          if (opponentIndex !== -1) {
+            const capturedPiece = opponent[opponentIndex].piece;
+            opponent.splice(opponentIndex, 1);
+            
+            // 成り駒を元に戻して持ち駒に追加
+            if (mv.IsSelfStep()) {
+              let actualPiece = capturedPiece;
+              if (capturedPiece && capturedPiece in UNPROMOTED_MAP) {
+                actualPiece = UNPROMOTED_MAP[capturedPiece as string];
+              }
+              const count = newField.capturedPieces.get(actualPiece) || 0;
+              newField.capturedPieces.set(actualPiece, count + 1);
+            }
+          }
+
+          // 移動したのが敵の王なら位置を更新
+          if (!mv.IsSelfStep() && (mv.piece === '王' || mv.piece === '玉')) {
+            newField.opponentking.position = mv.to;
+          }
+        }
+      }
+      return newField;
+    }
+
+    // 手を進めたフィールドを作成する
+    static advanceBaseField(field: Field, move: MovePiece): Field {
+      return this.advanceStepField(field, move.History());
+    }
+
+    // boardからFieldオブジェクトを作成
+    static fromBoard(board: (Piece | null)[][], capturedArray: PieceType[]): Field {
+      let opponentKing: PiecePosition | null = null;
+      const opponentPieces: PiecePosition[] = [];
+      const selfPieces: PiecePosition[] = [];
+
+      for (let row = 0; row < 9; row++) {
+        for (let col = 0; col < 9; col++) {
+          const piece = board[row][col];
+          if (piece && piece.type) {
+            const position = ToHash(row, col);
+            const piecePos = new PiecePosition(position, piece.type);
+
+            if (piece.side === 'opponent') {
+              if (piece.type === '王' || piece.type === '玉') {
+                opponentKing = piecePos;
+              }
+              opponentPieces.push(piecePos);
+            } else if (piece.side === 'self') {
+              selfPieces.push(piecePos);
+            }
+          }
+        }
+      }
+
+      // 持ち駒を集計
+      const capturedMap = new Map<PieceType, number>();
+      for (const piece of capturedArray) {
+        if (piece) {
+          const count = capturedMap.get(piece) || 0;
+          capturedMap.set(piece, count + 1);
+        }
+      }
+
+      if (!opponentKing) {
+        throw new Error('相手の玉が見つかりません');
+      }
+
+      return new Field(opponentKing, opponentPieces, selfPieces, capturedMap);
+    }
+
+    // FieldからBoard配列を作成
+    toBoard(): (Piece | null)[] {
+      const board: (Piece | null)[] = Array(81).fill(null);
+      
+      // 相手の玉を配置
+      if (this.opponentking.position !== null) {
+        board[this.opponentking.position] = {
+          type: this.opponentking.piece,
+          side: 'opponent'
+        };
+      }
+      
+      // 相手の駒を配置
+      for (const pp of this.opponentpieces) {
+        if (pp.position !== null) {
+          board[pp.position] = {
+            type: pp.piece,
+            side: 'opponent'
+          };
+        }
+      }
+      
+      // 自分の駒を配置
+      for (const pp of this.selfpieces) {
+        if (pp.position !== null) {
+          board[pp.position] = {
+            type: pp.piece,
+            side: 'self'
+          };
+        }
+      }
+      
+      return board;
+    }
+  }
+
+  // FieldからBoard配列を作成する関数
+  const fieldToBoard = (field: Field): (Piece | null)[][] => {
+    const result = Array(9).fill(null).map(() => Array(9).fill(null));
+    const boardArray = field.toBoard();
+    for (let i = 0; i < 81; i++) {
+      const [col, row] = FromHash(i);
+      result[col][row] = boardArray[i];
+    }
+    return result;
+  };
+
+  // Fieldをハッシュ文字列に変換（トランスポジション検出用）
+  const hashField = (field: Field, side: string): string => {
+    // 自分の駒を位置でソートして文字列化
+    const selfPieces = field.selfpieces
+      .filter(pp => pp.position !== null)
+      .map(pp => `${pp.position}${pp.piece}`)
+      .sort()
+      .join('|');
+    
+    // 相手の駒を位置でソートして文字列化
+    const opponentPieces = field.opponentpieces
+      .filter(pp => pp.position !== null)
+      .map(pp => `${pp.position}${pp.piece}`)
+      .sort()
+      .join('|');
+    
+    // 持ち駒をソートして文字列化
+    const captured = Array.from(field.capturedPieces.entries())
+      .sort((a, b) => (a[0] || '').localeCompare(b[0] || ''))
+      .map(([piece, count]) => `${piece}:${count}`)
+      .join(',');
+    
+    return `S${selfPieces}O${opponentPieces}C${captured}{${side}}`;
+  };
+
+  // 相手の手番で全ての選択肢が成功かチェックし、成功なら上位に伝播
+  function checkAndPropagateOpponentSuccess(move: MovePiece): boolean {
+    if (!move.IsSelfStep()){
+      console.trace('現在のスタックトレース');
+      throw new Error('checkAndPropagateOpponentSuccessは自分の手番でのみ呼び出してください');
+    }
+
+    const allSiblingsSuccess = move.nextMove.every(mv => mv.isSuccess());
+    return allSiblingsSuccess
+  }
+
+  // 同一盤面があるか確認し、なければ登録する関数
+  function checkOrRegisterField(
+    visitedFields: Map<string, MovePiece>,
+    nextField: Field, 
+    move: MovePiece
+  ): MovePiece | null {
+    // nextField is after applying move, so the side to move flips
+    const fieldHash = hashField(nextField, move.IsSelfStep() ? 'o' : 's');
+    
+    // 既に探索済みの盤面があるか確認
+    if (visitedFields.has(fieldHash)) {
+      const firstMove = visitedFields.get(fieldHash);
+      if (firstMove) {
+        move.setRedirect(firstMove);
+        return firstMove;
+      }
+    }
+    
+    // 新しい盤面として登録
+    visitedFields.set(fieldHash, move);
+     return null;
+  }
+
+  // 成功判定処理
+  function setSuccess(move: MovePiece, successMove: MovePiece): boolean {
+    // すでに成功済みならスキップ（無限ループ防止）
+    if (move.isSuccess()) {
+      console.trace('現在のスタックトレース');
+      throw new Error('successが2回呼ばれました');
+    }
+
+    move.setSuccess(successMove);
+
+    // 最初の手なら成功
+    if (!move.prevMove){
+      console.trace('現在のスタックトレース');
+      return true;
+    }
+
+    if (move.IsSelfStep()){
+      // 先手番なら、直前の後手番を成功に変更して、すべて成功か確認する
+      if (!move.prevMove.isSuccess()){
+        const result = setSuccess(move.prevMove, move);
+        if (result) return true;
+      }
+      // redirectedListにも伝播
+      for (const mv of move.redirectedList) {
+        mv.setSuccess(successMove);
+        if (mv.prevMove && !mv.prevMove.isSuccess()) {
+          const result = setSuccess(mv.prevMove!, move);
+          if (result) return true;
+        }
+      }
+    }else{
+      // 後手番なら、他の手が全て成功か確認して、成功を伝播する
+      if (checkAndPropagateOpponentSuccess(move.prevMove)){
+        const result = setSuccess(move.prevMove, move);
+        if (result) return true;
+      }
+
+      // redirectedListにも伝播
+      for (const mv of move.redirectedList) {
+        mv.setSuccess(successMove);
+        if (checkAndPropagateOpponentSuccess(mv.prevMove!)){
+          const result = setSuccess(mv.prevMove!, move);
+          if (result) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // 詰将棋の解析メイン関数（非同期版）
+  const analyzeMateAsync = async (
+    initialBoard: (Piece | null)[][], 
+    initialCaptured: PieceType[], 
+    abortSignal?: AbortSignal,
+    progressCallback?: (progress: {queueSize: number, maxDepth: number}) => void
+  ): Promise<{ 
+    steps: string[], 
+    moves: MovePiece[], 
+    initialField: Field, 
+    rootMoves: MovePiece[],
+    timedOut?: boolean,
+    queueSize?: number,
+    maxStepReached?: number
+  }> => {
+    const steps: string[] = [];
+    const maxDepth = 15; // 最大探索深さ
+
+    const field = Field.fromBoard(initialBoard, initialCaptured);
+    
+    // 優先度付きキューを作成
+    const queue = new PriorityQueue();
+
+    let computedMove: MovePiece | null = null;
+    let nodeCount = 0;
+    let maxStepReached = 0;
+    let hashcount = 0;
+    const yieldInterval = 1000; // 1000ノードごとにイベントループに制御を戻す
+
+    const attackerMoves = generateSelfMoves(field, 0, null);
+    queue.pushArray(0, attackerMoves);
+
+    // トランスポジション（同一局面）検出用
+    const visitedFields = new Map<string, MovePiece>(); // ハッシュ → 最初のMovePiece
+
+    while(!queue.isEmpty()) {
+      // タイムアウトチェック
+      if (abortSignal?.aborted) {
+        console.log('タイムアウトにより探索を中断しました');
+        // タイムアウト時も部分結果を返す
+        return { 
+          steps: [], 
+          moves: [], 
+          initialField: field, 
+          rootMoves: attackerMoves,
+          timedOut: true,
+          queueSize: queue.size(),
+          maxStepReached
+        };
+      }
+
+      const priority = queue.peekPriority();
+      const move = queue.pop();
+      if (!move) break;
+
+      // 処理済みに変更
+      if (move.getStatus() !== 'none') continue;
+
+      if (maxDepth <= move.step) {
+        continue;
+      }
+
+      nodeCount++;
+      maxStepReached = Math.max(maxStepReached, move.step);
+      
+      // 定期的にイベントループに制御を戻す
+      if (nodeCount % yieldInterval === 0) {
+        // 進捗情報を更新（1000ノードごと）
+        if (progressCallback){
+          progressCallback({ queueSize: queue.size(), maxDepth: maxStepReached });
+        }
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+
+      const step = move.step + 1;
+
+      // 盤面を作成する
+      const nextField = Field.advanceBaseField(field, move);
+
+      // トランスポジション検出（同一盤面をスキップ）
+      const firstMove = checkOrRegisterField(visitedFields, nextField, move);
+      if (firstMove && 0 <= priority){
+        if (firstMove.isSuccess()) {
+          const successTarget = (firstMove.successMove === firstMove) ? move : firstMove.successMove!;
+          const result = setSuccess(move, successTarget);
+          if (result){
+            computedMove = move;
+            break;
+          }
+        }
+
+        // 解析してないなら、キューに詰み直す
+        if (firstMove.getStatus() === 'none'){
+          queue.push(-1, firstMove);
+        }
+        hashcount++;
+        continue;
+      }
+
+    if (step % 2 === 0) {
+        // 先手を考える (moveは直線の手番＝後手)
+
+        // 前回の自分の手が失敗していたらスキップ
+        if (move.prevMove && move.prevMove.getStatus() === 'failure'){
+          move.status = 'done';
+          continue;
+        }
+
+        // 駒数チェック：全滅 or 手持ちなし＋駒1枚で負け
+        if (nextField.selfpieces.length == 0 || nextField.selfpieces.length + nextField.capturedPieces.size < 2) {
+          if (move.prevMove) {
+            move.prevMove.status = 'failure';
+          }
+          move.status = 'done';
+          continue;
+        }
+
+        // 攻め方を列挙する関数
+        const attackerMoves = generateSelfMoves(nextField, step, move);
+        if (attackerMoves.length === 0) {
+          // 攻め手がないので負け確定
+          if (move.prevMove) {
+            move.prevMove.status = 'failure';
+          }
+          move.status = 'done';
+          continue;
+        }
+
+        queue.pushArray(step, attackerMoves);
+        move.status = 'done';
+    }else{
+        // 後手番、moveは直線の手番＝先手
+
+        // 前回の相手の手が成功していたらスキップ
+        if (move.prevMove && move.prevMove.isSuccess() && 0 <= priority){
+          continue;
+        }
+
+        const attackerMoves = generateOpponentMoves(nextField, step, move);
+        if (attackerMoves.length === 0) {
+          // 直前の手が打ち歩詰めかチェック
+          if (move && move.piece === '歩' && move.IsDrop()) {
+            // 打ち歩詰めなので詰みではない
+            move.status = 'failure';
+            continue;
+          }
+
+          // 詰みを発見
+          const result = setSuccess(move, move);
+
+          if (result) {
+            computedMove = move;
+            break;
+          }
+        }
+        queue.pushArray(step, attackerMoves);
+        move.status = 'done';
+      }
+    }
+
+    if (computedMove) {
+      // 手順を記録
+      const moveSequence: MovePiece[] = [];
+
+      let current = attackerMoves.find(mv => mv.isSuccess());
+      if (!current){
+        throw new Error('computedMoveがあるのに成功手が見つかりません');
+      }
+
+      for(;;){
+        moveSequence.push(current);
+        if (current.successMove == current) break;
+        current = current.successMove!;
+      }
+      moveSequence.forEach(mv => {
+        steps.push(formatMove(mv));
+      });
+      return { steps, moves: moveSequence, initialField: field, rootMoves: attackerMoves };
+    }
+
+    console.log(`探索終了: ノード数=${nodeCount}, トランスポジションヒット=${hashcount}`);
+
+    return { steps: [], moves: [], initialField: field, rootMoves: attackerMoves };
+  };
+
+  // 駒の移動先を取得
+  const getPieceMoves = (board: (Piece | null)[], pos : number, pieceType : PieceType, side : Side = 'self', trample :boolean = false): number[] => {
+    const moves: number[] = [];
+    const directions = getPieceDirections(pieceType, side);
+    
+    const [row, col] = FromHash(pos);
+    for (const [dr, dc, range] of directions) {
+      for (let i = 1; i <= range; i++) {
+        const newRow = row + dr * i;
+        const newCol = col + dc * i;
+        const newpos = ToHash(newRow, newCol);
+        
+        if (newRow < 0 || newRow >= 9 || newCol < 0 || newCol >= 9) break;
+        
+        const target = board[newpos];
+        // trampleがtrueの場合、自分の駒にも移動できる
+        if (target && target.side === side && !trample && (side !== 'self' || target.type !== '玉')) break;
+        
+        moves.push(newpos);
+        
+        // 自分の場合、玉を貫通する
+        if (target && (side !== 'self' || target.type !== '玉')) break; // 相手の駒で止まる
+      }
+    }
+    
+    return moves;
+  };
+
+  // 駒の移動方向を取得（簡略版）
+  const getPieceDirections = (pieceType: PieceType, side: Side): [number, number, number][] => {
+    const isOpponent = side === 'opponent';
+    const forward = isOpponent ? 1 : -1;
+    
+    switch (pieceType) {
+      case '歩':
+        return [[forward, 0, 1]];
+      case '香':
+        return [[forward, 0, 9]];
+      case '桂':
+        return [[forward * 2, -1, 1], [forward * 2, 1, 1]];
+      case '銀':
+        return [[forward, -1, 1], [forward, 0, 1], [forward, 1, 1], [-forward, -1, 1], [-forward, 1, 1]];
+      case '金':
+      case 'と':
+      case '成香':
+      case '成桂':
+      case '成銀':
+        return [[forward, -1, 1], [forward, 0, 1], [forward, 1, 1], [0, -1, 1], [0, 1, 1], [-forward, 0, 1]];
+      case '王':
+      case '玉':
+        return [[-1, -1, 1], [-1, 0, 1], [-1, 1, 1], [0, -1, 1], [0, 1, 1], [1, -1, 1], [1, 0, 1], [1, 1, 1]];
+      case '飛':
+        return [[-1, 0, 9], [1, 0, 9], [0, -1, 9], [0, 1, 9]];
+      case '龍':
+        return [[-1, 0, 9], [1, 0, 9], [0, -1, 9], [0, 1, 9], [-1, -1, 1], [-1, 1, 1], [1, -1, 1], [1, 1, 1]];
+      case '角':
+        return [[-1, -1, 9], [-1, 1, 9], [1, -1, 9], [1, 1, 9]];
+      case '馬':
+        return [[-1, -1, 9], [-1, 1, 9], [1, -1, 9], [1, 1, 9], [-1, 0, 1], [1, 0, 1], [0, -1, 1], [0, 1, 1]];
+      default:
+        return [];
+    }
+  };
+
+  const getLongRangeAttackStep = (pieceType: PieceType, from: number, to: number): [number, number] | null => {
+    const [fromRow, fromCol] = FromHash(from);
+    const [toRow, toCol] = FromHash(to);
+    const rowDiff = toRow - fromRow;
+    const colDiff = toCol - fromCol;
+    const rowStep = Math.sign(rowDiff);
+    const colStep = Math.sign(colDiff);
+
+    switch (pieceType) {
+      case '飛':
+      case '龍':
+        if (fromRow === toRow && fromCol !== toCol) {
+          return [0, colStep];
+        }
+        if (fromCol === toCol && fromRow !== toRow) {
+          return [rowStep, 0];
+        }
+        return null;
+      case '角':
+      case '馬':
+        if (Math.abs(rowDiff) === Math.abs(colDiff) && rowDiff !== 0) {
+          return [rowStep, colStep];
+        }
+        return null;
+      case '香':
+        if (fromCol === toCol && toRow < fromRow) {
+          return [-1, 0];
+        }
+        return null;
+      default:
+        return null;
+    }
+  };
+
+  const getSquaresBetweenExclusive = (from: number, to: number, rowStep: number, colStep: number): number[] => {
+    const squares: number[] = [];
+    let [row, col] = FromHash(from);
+    const [toRow, toCol] = FromHash(to);
+
+    row += rowStep;
+    col += colStep;
+    while (row !== toRow || col !== toCol) {
+      squares.push(ToHash(row, col));
+      row += rowStep;
+      col += colStep;
+    }
+
+    return squares;
+  };
+
+  // 王が詰んでいないかチェック（守り方の手の有効性確認）
+  // 駒の移動可能な位置を生成
+  const generateSelfMoves = (field: Field, steps : number, prevMove: MovePiece | null): MovePiece[] => {
+    const moves: MovePiece[] = [];
+    const moveKeys = new Set<string>();
+
+    const addMove = (piece: PieceType, from: number | null, to: number, change: boolean = false) => {
+      const key = `${piece ?? ''}:${from ?? 'drop'}:${to}:${change ? 1 : 0}`;
+      if (moveKeys.has(key)) {
+        return;
+      }
+
+      moveKeys.add(key);
+      moves.push(new MovePiece(steps, piece, from, to, prevMove, change));
+    };
+    
+    const board = field.toBoard();
+    const kingpos = field.opponentking.position ?? 0;
+    // 盤上の駒の移動
+    field.selfpieces.forEach(pp => {
+      // 自分の駒の移動範囲を取得
+      const pos = pp.position;
+      if (pos !== null && pp.piece) {
+        // 自分の駒の移動範囲を取得
+        const pieceMoves = getPieceMoves(board, pos, pp.piece, 'self');
+        // 王手の範囲を取得
+        const kingMoveList = getPieceMoves(board, kingpos, pp.piece, 'opponent', true);
+        // この2つが重なった場所が王手の範囲
+        pieceMoves.forEach(move => {
+          if (kingMoveList.some(km => km === move)) {
+            addMove(pp.piece, pos, move);
+          }
+        });
+        // 成れるコマか
+        if (pp.piece in PROMOTED_MAP) {
+          const promotedType = PROMOTED_MAP[pp.piece];
+
+          // 王手の範囲を取得
+          const kingMovePromotedList = getPieceMoves(board, kingpos, promotedType, 'opponent', true);
+          if (isEnemyField(pos)) {
+            // この2つが重なった場所が王手の範囲
+            pieceMoves.forEach(move => {
+              if (kingMovePromotedList.some(km => km == move)) {
+                addMove(promotedType, pos, move, true);
+              }
+            }); 
+          }else{
+            // 移動後の位置が敵陣の場合も成れる
+            pieceMoves.forEach(move => {
+              if (isEnemyField(move) && kingMovePromotedList.some(km => km == move)) {
+                addMove(promotedType, pos, move, true);
+              }
+            }); 
+          }
+
+        }
+      }
+    });
+
+    // 持ち駒の打ち場所
+    field.capturedPieces.forEach((count, pieceType) => {
+      if (count > 0) {
+        // 王手の範囲を取得
+        const kingMoveList = getPieceMoves(board, kingpos, pieceType, 'opponent');
+        // 王手の範囲
+        kingMoveList.forEach(move => {
+          if (board[move] === null){
+            addMove(pieceType, null, move);
+          }
+        });
+      }
+    });
+
+    // 遠距離コマと王の間に駒がある場合、その駒を動かして王手をかける手を列挙する
+    field.selfpieces.forEach(attacker => {
+      const attackerPos = attacker.position;
+      if (attackerPos === null || !attacker.piece || !LONG_RANGE_PIECES.includes(attacker.piece)) {
+        return;
+      }
+
+      const attackStep = getLongRangeAttackStep(attacker.piece, attackerPos, kingpos);
+      if (!attackStep) {
+        return;
+      }
+
+      const betweenSquares = getSquaresBetweenExclusive(attackerPos, kingpos, attackStep[0], attackStep[1]);
+      const occupiedBetween = betweenSquares.filter(square => board[square] !== null);
+      if (occupiedBetween.length !== 1) {
+        return;
+      }
+
+      const blockerPos = occupiedBetween[0];
+      const blockerOnBoard = board[blockerPos];
+      if (!blockerOnBoard || blockerOnBoard.side !== 'self') {
+        return;
+      }
+
+      const blocker = field.selfpieces.find(pp => pp.position === blockerPos);
+      if (!blocker || !blocker.piece) {
+        return;
+      }
+
+      const betweenSquaresSet = new Set(betweenSquares);
+      const blockerMoves = getPieceMoves(board, blockerPos, blocker.piece, 'self');
+
+      blockerMoves.forEach(move => {
+        if (!betweenSquaresSet.has(move)) {
+          addMove(blocker.piece, blockerPos, move);
+        }
+      });
+
+      if (blocker.piece in PROMOTED_MAP) {
+        const promotedType = PROMOTED_MAP[blocker.piece];
+
+        blockerMoves.forEach(move => {
+          if (betweenSquaresSet.has(move)) {
+            return;
+          }
+
+          if (isEnemyField(blockerPos) || isEnemyField(move)) {
+            addMove(promotedType, blockerPos, move, true);
+          }
+        });
+      }
+    });
+    
+
+    return moves;
+  };
+
+  // 相手の駒の移動可能な位置を生成（守り方）
+  const generateOpponentMoves = (field: Field, steps: number, prevMove: MovePiece | null): MovePiece[] => {
+    const moves: MovePiece[] = [];
+    const attackedPieces : PiecePosition[] = [];
+    const longrangePieces: PiecePosition[] = [];
+    const kingpos = field.opponentking.position ?? 0;
+    
+    // 利きマスの一覧
+    const board = field.toBoard();
+    const attackSquares = new Set<number>();
+    field.selfpieces.forEach(pp => {
+      if (pp.position !== null) {
+        const pieceMoves = getPieceMoves(board, pp.position, pp.piece, 'self', true);
+        pieceMoves.forEach(move => {
+          attackSquares.add(move);
+        });
+
+        // 王を攻撃している駒を記録
+        if (pieceMoves.some(mv => mv === kingpos)) {
+          attackedPieces.push(pp);
+          // 遠距離ユニットの場合は別に記録
+          if (pp.piece && LONG_RANGE_PIECES.includes(pp.piece)) {
+            // 王に隣接していない
+            if (pp.position !== null && !areAdjacent(kingpos, pp.position)) {
+              longrangePieces.push(pp);
+            }
+          }
+        }
+      }
+    });
+
+    // 王が逃げる手を考える
+    const kingMoves = getPieceMoves(board, kingpos, '玉', 'opponent' );
+    kingMoves.forEach(move => {
+      // 自分の駒の利きがないマスにのみ逃げられる
+      if (!attackSquares.has(move)) {
+        moves.push(new MovePiece(steps, '玉', kingpos, move, prevMove));
+      }
+    });
+
+    // 攻撃している駒を取る
+    if (attackedPieces.length == 1) {
+      const targetPos = attackedPieces[0].position;
+      field.opponentpieces.forEach(pp => {
+        //王は逃げる手で考慮済みなので除外
+        if (pp.piece === '玉') return;
+
+        // 自分の駒で攻撃している駒を取れるか？
+        const pieceMove = getPieceMoves(board, pp.position!, pp.piece, 'opponent' );
+        if (pieceMove.some(mv => mv === targetPos)) {
+          moves.push(new MovePiece(steps, pp.piece, pp.position, targetPos ?? 0, prevMove));
+        }
+      });
+    }
+
+    // 合駒を打つ
+    const [kingrow, kingcol] = FromHash(kingpos);
+    if (attackedPieces.length == 1 && longrangePieces.length == 1) {
+      const attackedPos = longrangePieces[0].position;
+      // 王と攻撃されている駒の間のマスに歩を打つ
+
+      const [atrow, atcol] = FromHash(attackedPos!);
+
+      const xstep = Math.sign(atcol - kingcol);
+      const ystep = Math.sign(atrow - kingrow);
+      for(let i = 1; i < 9; i++) {
+        const betweenRow = kingrow + ystep * i;
+        const betweenCol = kingcol + xstep * i;
+        if (betweenRow === atrow && betweenCol === atcol) {
+          break;
+        }
+        if (betweenRow < 0 || betweenRow >= 9 || betweenCol < 0 || betweenCol >= 9) {
+          break;
+        }
+        moves.push(new MovePiece(steps, '歩', null, ToHash(betweenRow, betweenCol), prevMove));
+      }
+    }
+
+    return moves;
+  }
+
+  const StatusFormat = (status : Status) : string => {
+    switch(status){
+      case 'success':
+        return '【成功】';
+      case 'failure':
+        return '【失敗】';
+      case 'none':
+        return '【未解析】';
+      default:
+        return '';
+    }
+  };
+
+  function formatPositionFromHash(hash: number): string {
+    const [row, col] = FromHash(hash);
+    return `${9 - col}${KANJI_NUMBERS[row + 1]}`;
+  }
+
+  // 手を文字列化
+  const formatMove = (move: MovePiece, success: boolean = false): string => {
+    const str = (success ? StatusFormat(move.getStatus()) : '');
+
+    if (move.from === null) {
+      return `${move.step + 1}手: ${formatPositionFromHash(move.to)}${move.piece}打` + str;
+    } else if (move.from !== null) {
+      if (move.change) {
+        const actualPiece = UNPROMOTED_MAP[move.piece as string];
+        return `${move.step + 1}手: ${formatPositionFromHash(move.to)}${actualPiece}成 [${formatPositionFromHash(move.from)}]` + str;
+      }
+      return `${move.step + 1}手: ${formatPositionFromHash(move.to)}${move.piece} [${formatPositionFromHash(move.from)}]` + str;
+    }
+    return '';
+  };
+
+  // 表示用の盤面を取得
+  const getDisplayBoard = (): (Piece | null)[][] => {
+    if (!viewMode || !initialField) {
+      return board;
+    }
+    
+    if (currentPath.length === 0) {
+      return fieldToBoard(initialField);
+    }
+    
+    // currentPathの最後の手まで適用
+    const lastMove = currentPath[currentPath.length - 1];
+    const field = Field.advanceBaseField(initialField, lastMove);
+    return fieldToBoard(field);
+  };
+
+  // 表示用の持ち駒を取得
+  const getDisplayCaptured = (): PieceType[] => {
+    if (!viewMode || !initialField) {
+      return capturedPieces;
+    }
+    
+    if (currentPath.length === 0) {
+      const captured: PieceType[] = [];
+      initialField.capturedPieces.forEach((count, piece) => {
+        for (let i = 0; i < count; i++) {
+          captured.push(piece);
+        }
+      });
+      return captured;
+    }
+    
+    // currentPathの最後の手まで適用
+    const lastMove = currentPath[currentPath.length - 1];
+    const field = Field.advanceBaseField(initialField, lastMove);
+    const captured: PieceType[] = [];
+    field.capturedPieces.forEach((count, piece) => {
+      for (let i = 0; i < count; i++) {
+        captured.push(piece);
+      }
+    });
+    return captured;
+  };
+
+  // 現在表示すべき候補手を取得
+  const getCurrentMoves = (): MovePiece[] => {
+    if (!viewMode) return [];
+    
+    if (currentPath.length === 0) {
+      return rootMoves;
+    }
+    
+    const lastMove = currentPath[currentPath.length - 1];
+    
+    // リダイレクトがある場合、リダイレクト先の手を返す
+    if (lastMove.redirectMove) {
+      return lastMove.redirectMove.nextMove;
+    }
+    
+    return lastMove.nextMove;
+  };
+
+  // 選択した駒に基づいて候補手をフィルタリング
+  const getFilteredMoves = (): MovePiece[] => {
+    const allMoves = getCurrentMoves();
+    
+    let filteredMoves: MovePiece[];
+    
+    if (!selectedPieceInView) {
+      filteredMoves = allMoves;
+    } else if (typeof selectedPieceInView === 'string') {
+      // 持ち駒が選択されている場合（PieceTypeの場合）
+      const dropMoves = allMoves.filter(move => 
+        move.IsDrop() && move.piece === selectedPieceInView
+      );
+      
+      // 移動先が選択されている場合、さらに絞り込み
+      if (selectedDestination) {
+        const hash = selectedDestination.hash();
+        filteredMoves = dropMoves.filter(move =>
+          move.to === hash
+        );
+      } else {
+        filteredMoves = dropMoves;
+      }
+    } else {
+      // 盤上の駒が選択されている場合（Coordinateの場合）
+      const hash = selectedPieceInView.hash();
+      const pieceMoves = allMoves.filter(move => 
+        move.from && 
+        move.from === hash
+      );
+      
+      // 移動先が選択されている場合、さらに絞り込み（成りと不成の両方を表示）
+      if (selectedDestination) {
+        const hash = selectedDestination.hash();
+        filteredMoves = pieceMoves.filter(move =>
+          move.to === hash
+        );
+      } else {
+        filteredMoves = pieceMoves;
+      }
+    }
+    
+    // ソート処理：詰み手（solutionPathに含まれる）を最優先、次に成功属性
+    return filteredMoves.sort((a, b) => {
+      // solutionPathに含まれる手かチェック
+      const aInSolution = solutionPath && currentPath.length < solutionPath.length && 
+        solutionPath[currentPath.length] === a;
+      const bInSolution = solutionPath && currentPath.length < solutionPath.length && 
+        solutionPath[currentPath.length] === b;
+      
+      if (aInSolution && !bInSolution) return -1;
+      if (!aInSolution && bInSolution) return 1;
+      
+      // 成功属性でソート
+      if (a.isSuccess() && !b.isSuccess()) return -1;
+      if (!a.isSuccess() && b.isSuccess()) return 1;
+      
+      // それ以外は元の順序を維持
+      return 0;
+    });
+  };
+
+  // サンプル問題を読み込む
+  const handleSample = () => {
+    const newBoard: (Piece | null)[][] = Array(9).fill(null).map(() => Array(9).fill(null));
+    
+    // サンプルデータ
+    newBoard[0][3] = { type: '銀', side: 'opponent' }; // 4 1 O 銀
+    newBoard[0][4] = { type: '玉', side: 'opponent' }; // 5 1 O 玉
+    newBoard[0][5] = { type: '銀', side: 'opponent' }; // 6 1 O 銀
+    newBoard[2][4] = { type: '銀', side: 'self' };     // 5 3 S 銀
+    newBoard[4][7] = { type: '角', side: 'self' };     // 8 5 S 角
+    
+    setBoard(newBoard);
+    setCapturedPieces(['銀']);
+    setSelectedCell(null);
+    setSelectedCapturedIndex(null);
+  };
+
+  return (
+    <main className="max-w-7xl mx-auto px-4 py-6">
+      <div className="flex items-center mb-4 gap-2">
+        <Link href="/" className="inline-block px-4 py-2 bg-gray-100 rounded hover:bg-gray-200">トップに戻る</Link>
+      </div>
+
+      <h2 className="text-2xl font-bold mb-4">詰将棋ソルバー</h2>
+
+      {/* ボタン */}
+      <div className="mb-4 flex flex-wrap gap-2 items-center">
+        {!viewMode ? (
+          <>
+            <button
+              className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+              onClick={handleAnalyze}
+              disabled={isAnalyzing}
+            >{isAnalyzing ? '解析中...' : '解析'}</button>
+            {isAnalyzing && analysisProgress && (
+              <span className="text-sm text-gray-600">
+                探索中: {analysisProgress.maxDepth}手目 (候補: {analysisProgress.queueSize})
+              </span>
+            )}
+            <button
+              className="px-4 py-2 bg-red-200 text-red-700 rounded hover:bg-red-300"
+              onClick={handleReset}
+            >リセット</button>
+            <button
+              className="px-4 py-2 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
+              onClick={handleSample}
+            >サンプル</button>
+            <button
+              className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+              onClick={handleExport}
+            >エクスポート</button>
+            <button
+              className="px-4 py-2 bg-orange-100 text-orange-700 rounded hover:bg-orange-200"
+              onClick={handleImport}
+            >インポート</button>
+          </>
+        ) : (
+          <>
+            <button
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+              onClick={handleBackToInput}
+            >入力に戻る</button>
+            <button
+              className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50"
+              onClick={handleResetToStart}
+              disabled={currentPath.length === 0}
+            >0手</button>
+            <button
+              className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50"
+              onClick={handlePrevStep}
+              disabled={currentPath.length === 0}
+            >←</button>
+            <span className="px-4 py-2 font-semibold w-24 text-center">
+              {currentPath.length === 0 ? '初期状態' : `${currentPath.length}手目`}
+            </span>
+            <button
+              className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50"
+              onClick={handleNextStep}
+              disabled={!solutionPath || currentPath.length >= solutionPath.length}
+            >→</button>
+          </>
+        )}
+      </div>
+
+      <div className="flex flex-col lg:flex-row gap-8">
+        {/* 盤面と持ち駒 */}
+        <div>
+          <h3 className="font-semibold mb-2">盤面{viewMode ? '' : '（クリックで選択）'}</h3>
+          <div className="inline-block">
+            {/* 列番号（上） */}
+            <div className="flex">
+              <div className="w-6"></div> {/* 左上の空白 */}
+              {[9, 8, 7, 6, 5, 4, 3, 2, 1].map(col => (
+                <div key={col} className="w-8 sm:w-10 lg:w-12 text-center text-xs sm:text-sm font-semibold">{col}</div>
+              ))}
+            </div>
+            {/* 盤面 */}
+            <div className="flex">
+              {/* 行番号（右） */}
+              <div className="w-6"></div> {/* 左側の空白 */}
+              <div className="border-4 border-amber-900 bg-amber-100">
+            {getDisplayBoard().map((row, rowIndex) => (
+              <div key={rowIndex} className="flex">
+                {row.map((piece, colIndex) => {
+                  const isSelected = selectedCell?.row === rowIndex && selectedCell?.col === colIndex;
+                  
+                  // ビューモードでの処理
+                  let candidateMove: MovePiece | null = null;
+                  let isPieceSelectable = false;
+                  let isSelectedPiece = false;
+                  let isLastMovedPiece = false; // 直前に動かした駒かどうか
+                  let isLastMoveDropped = false; // 直前の手が打ったものか
+                  
+                  if (viewMode) {
+                    const filteredMoves = getFilteredMoves();
+                    
+                    // 直前に動かした駒の位置をチェック
+                    if (currentPath.length > 0) {
+                      const lastMove = currentPath[currentPath.length - 1];
+                      const [lastMoveRow, lastMoveCol] = FromHash(lastMove.to);
+                      isLastMovedPiece = lastMoveRow === rowIndex && lastMoveCol === colIndex;
+                      isLastMoveDropped = lastMove.IsDrop();
+                    }
+                    
+                    // 選択中の駒かどうか（盤上の駒のみチェック）
+                    isSelectedPiece = selectedPieceInView !== null && 
+                      typeof selectedPieceInView !== 'string' &&
+                      selectedPieceInView.row === rowIndex && 
+                      selectedPieceInView.col === colIndex;
+                    
+                     const indexHash = ToHash(rowIndex, colIndex);
+                    if (selectedPieceInView) {
+                      // 駒を選択済み：フィルタリングされた移動先を表示
+                      candidateMove = filteredMoves.find(m => m.to === indexHash) || null;
+                    } else {
+                      // 駒未選択：移動可能な駒を判定
+                      const allMoves = getCurrentMoves();
+                      isPieceSelectable = piece !== null && allMoves.some(m => 
+                        m.from && m.from === ToHash(rowIndex, colIndex)
+                      );
+                    }
+                  }
+                  
+                  return (
+                    <div
+                      key={`${rowIndex}-${colIndex}`}
+                      className={`w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 border border-amber-900 flex items-center justify-center text-base sm:text-lg lg:text-xl font-bold relative
+                        ${!viewMode ? 'cursor-pointer' : (candidateMove || isPieceSelectable) ? 'cursor-pointer' : ''}
+                        ${isSelected && !viewMode ? 'bg-yellow-300' : 
+                          isLastMovedPiece ? 'bg-red-100' :
+                          isSelectedPiece ? 'bg-yellow-300' :
+                          candidateMove ? 'bg-green-200' : 
+                          isPieceSelectable ? 'bg-blue-100' : 'bg-amber-50'}
+                        ${!viewMode && !isSelected ? 'hover:bg-amber-200' : 
+                          candidateMove ? 'hover:bg-green-300' : 
+                          isPieceSelectable ? 'hover:bg-blue-200' : ''}
+                        ${piece?.side === 'self' ? 'text-blue-700' : ''}
+                        ${piece?.side === 'opponent' ? 'text-red-700' : ''}
+                      `}
+                      onClick={() => {
+                        if (!viewMode) {
+                          handleCellClick(rowIndex, colIndex);
+                        } else if (candidateMove) {
+                          // 移動先を選択
+                          const destination = ToHash(rowIndex, colIndex);
+                          
+                          // この移動先への候補が何個あるかチェック
+                          const currentMoves = selectedPieceInView ? 
+                            getCurrentMoves().filter(m => {
+                              if (typeof selectedPieceInView === 'string') {
+                                return m.IsDrop() && m.piece === selectedPieceInView &&
+                                  m.to === destination;
+                              } else {
+                                const selectHash = ToHash(selectedPieceInView.row, selectedPieceInView.col);
+
+                                return m.from && m.from === selectHash && m.to === destination;
+                              }
+                            }) : [];
+                          
+                          if (currentMoves.length === 1) {
+                            // 候補が1つなら即座に確定
+                            handleSelectMove(currentMoves[0]);
+                          } else if (currentMoves.length > 1) {
+                            // 候補が複数ある場合（成りと不成）、移動先を選択状態にする
+                            setSelectedDestination(new Coordinate(rowIndex, colIndex));
+                          }
+                        } else if (isPieceSelectable) {
+                          // 駒を選択
+                          setSelectedPieceInView(new Coordinate(rowIndex, colIndex));
+                        }
+                      }}
+                    >
+                      {/* 直前に打った駒の場合「打」を表示 */}
+                      {isLastMovedPiece && isLastMoveDropped && (
+                        <span className="absolute top-0 right-0 text-xs bg-orange-500 text-white px-1 rounded">
+                          打
+                        </span>
+                      )}
+                      {renderPiece(piece)}
+                      {candidateMove && (() => {
+                        // この移動先への候補を取得
+                        const destination = ToHash(rowIndex, colIndex);
+                        const movesToThisSquare = selectedPieceInView ? 
+                          getCurrentMoves().filter(m => {
+                            if (typeof selectedPieceInView === 'string') {
+                              return m.IsDrop() && m.piece === selectedCapturedIndex && m.to === destination;
+                            } else {
+                              return m.from && m.from === selectedCapturedIndex && m.to === destination;
+                            }
+                          }) : [];
+                        
+                        // 成りのみがあるかチェック
+                        const hasPromotedOnly = movesToThisSquare.length === 1 && 
+                          movesToThisSquare[0].change;
+                        
+                        return (
+                          <span className="absolute top-0 right-0 text-xs bg-red-500 text-white px-1 rounded flex flex-col items-center leading-tight">
+                            <span>{candidateMove.IsDrop() ? '打' : '動'}</span>
+                            {hasPromotedOnly && <span>成</span>}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+              {/* 行番号（右側） */}
+              <div className="ml-1">
+                {[0, 1, 2, 3, 4, 5, 6, 7, 8].map(row => (
+                  <div key={row} className="h-8 sm:h-10 lg:h-12 flex items-center text-xs sm:text-sm font-semibold">
+                    {KANJI_NUMBERS[row + 1]}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* 持ち駒欄 */}
+          <div className="mt-6">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold">持ち駒:</span>
+              {getDisplayCaptured().map((piece, index) => {
+                // ビューモードでの処理
+                const isSelectedCaptured = viewMode && selectedPieceInView === piece;
+                const allMoves = viewMode ? getCurrentMoves() : [];
+                const isCapturedSelectable = viewMode && allMoves.some(m => m.IsDrop() && m.piece === piece);
+                
+                return (
+                  <div
+                    key={index}
+                    className={`w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 border-2 border-blue-700 bg-blue-50 flex items-center justify-center text-base sm:text-lg lg:text-xl font-bold text-blue-700
+                      ${viewMode ? (isCapturedSelectable ? 'cursor-pointer' : '') : 'cursor-pointer'}
+                      ${!viewMode && selectedCapturedIndex === index ? 'bg-yellow-300 border-yellow-500' : 
+                        isSelectedCaptured ? 'bg-yellow-300 border-yellow-500' : ''}
+                      ${!viewMode && selectedCapturedIndex !== index ? 'hover:bg-blue-100' : 
+                        isCapturedSelectable ? 'hover:bg-blue-100' : ''}
+                    `}
+                    onClick={() => {
+                      if (!viewMode) {
+                        handleCapturedClick(index);
+                      } else if (isCapturedSelectable) {
+                        setSelectedPieceInView(piece);
+                      }
+                    }}
+                  >
+                    {piece}
+                  </div>
+                );
+              })}
+              {/* 空欄 */}
+              {!viewMode && (
+                <div
+                  className={`w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 border-2 border-dashed border-gray-400 bg-gray-50 cursor-pointer flex items-center justify-center text-base sm:text-lg lg:text-xl
+                    ${selectedCapturedIndex === capturedPieces.length ? 'bg-yellow-300 border-yellow-500' : 'hover:bg-gray-100'}
+                  `}
+                  onClick={() => handleCapturedClick(capturedPieces.length)}
+                >
+                  <span className="text-gray-400">+</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* 駒選択パネル */}
+        {!viewMode && (
+        <div>
+          <h3 className="font-semibold mb-2">駒を選択</h3>
+          <div className="space-y-4">
+            {/* 相手の駒 */}
+            <div>
+              <p className="text-sm font-semibold mb-1 text-red-700">相手の駒（上向き）</p>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {PIECE_TYPES.map(pieceType => (
+                  <button
+                    key={`opponent-${pieceType}`}
+                    className="px-3 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 font-bold text-lg disabled:opacity-50"
+                    onClick={() => handlePlacePiece(pieceType === '王' ? '玉' : pieceType, 'opponent')}
+                    disabled={selectedCapturedIndex !== null || !selectedCell}
+                  >
+                    <span className="inline-block" style={{transform: 'rotate(180deg)'}}>
+                      {pieceType === '王' ? '玉' : pieceType}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 自分の駒 */}
+            <div>
+              <p className="text-sm font-semibold mb-1 text-blue-700">自分の駒（下向き）</p>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {PIECE_TYPES.map(pieceType => (
+                  <button
+                    key={`self-${pieceType}`}
+                    className="px-3 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 font-bold text-lg disabled:opacity-50"
+                    onClick={() => handlePlacePiece(pieceType === '玉' ? '王' : pieceType, 'self')}
+                    disabled={(selectedCapturedIndex !== null && pieceType === '王') || (!selectedCell && selectedCapturedIndex === null)}
+                  >
+                    {pieceType === '玉' ? '王' : pieceType}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 削除ボタン */}
+            <div>
+              <button
+                className="w-full px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 font-bold disabled:opacity-50"
+                onClick={handleDeletePiece}
+                disabled={
+                  (!selectedCell && selectedCapturedIndex === null) ||
+                  (selectedCapturedIndex === capturedPieces.length) ||
+                  (selectedCell !== null && board[selectedCell.row][selectedCell.col] === null)
+                }
+              >
+                削除
+              </button>
+            </div>
+          </div>
+
+          {selectedCell && (
+            <div className="mt-4 p-3 bg-blue-50 rounded">
+              <p className="text-sm">
+                選択中: {9 - selectedCell.col}筋{selectedCell.row + 1}段
+              </p>
+            </div>
+          )}
+          
+          {selectedCapturedIndex !== null && (
+            <div className="mt-4 p-3 bg-blue-50 rounded">
+              <p className="text-sm">
+                選択中: 持ち駒 {selectedCapturedIndex < capturedPieces.length ? `(${capturedPieces[selectedCapturedIndex]})` : '(空欄)'}
+              </p>
+            </div>
+          )}
+        </div>
+        )}
+        
+        {/* ビューモード：候補手リスト */}
+        {viewMode && (
+        <div>
+          <h3 className="font-semibold mb-2">候補手リスト</h3>
+          <div className="space-y-2">
+            {/* 履歴表示 */}
+            {currentPath.length > 0 && (
+              <div className="p-3 bg-gray-50 border border-gray-300 rounded text-sm">
+                <p className="font-semibold text-gray-700 mb-2">手順履歴</p>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {currentPath.map((move, index) => (
+                    <div key={index}>
+                      <div className="text-xs text-gray-600">
+                        {index + 1}. {formatMove(move, true)}
+                        {move.redirectMove && (
+                          <span className="ml-2 text-purple-600 font-semibold">
+                            (同一盤面)
+                          </span>
+                        )}
+                      </div>
+                      {move.redirectMove && (
+                        <div className="ml-4 mt-1 pl-2 border-l-2 border-purple-300">
+                          <p className="text-xs text-purple-700 font-semibold mb-1">別ルート:</p>
+                          {move.redirectMove.History().map((redirectedMove, ridx) => (
+                            <div key={ridx} className="text-xs text-purple-600">
+                              {ridx + 1}. {formatMove(redirectedMove, true)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {selectedPieceInView && (
+              <button
+                className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 rounded text-sm"
+                onClick={() => {
+                  setSelectedPieceInView(null);
+                  setSelectedDestination(null);
+                }}
+              >
+                駒選択を解除
+              </button>
+            )}
+            {selectedDestination && (
+              <div className="p-2 bg-yellow-50 border border-yellow-200 rounded text-sm">
+                <p className="font-semibold text-yellow-800">
+                  {9 - selectedDestination.col}筋{selectedDestination.row + 1}段への移動
+                </p>
+                <p className="text-xs text-gray-600">成る・成らないを選択してください</p>
+              </div>
+            )}
+            {getFilteredMoves().length > 0 ? (
+              <>
+                <p className="text-sm text-gray-600 mb-2">
+                  {currentPath.length % 2 === 0 ? '攻め方の手' : '守り方の手'} 
+                  ({getFilteredMoves().length}種類{selectedPieceInView ? ' / 絞り込み中' : ''})
+                </p>
+                <div className="max-h-96 overflow-y-auto space-y-2">
+                  {getFilteredMoves().map((move, index) => {
+                    const isOpponentTurn = currentPath.length % 2 === 1;
+                    return (
+                      <button
+                        key={index}
+                        className={`w-full px-3 py-2 rounded text-left text-sm ${
+                          isOpponentTurn 
+                            ? 'bg-red-50 hover:bg-red-100 border border-red-200' 
+                            : 'bg-blue-50 hover:bg-blue-100 border border-blue-200'
+                        }`}
+                        onClick={() => handleSelectMove(move)}
+                      >
+                        <div className={`font-semibold ${isOpponentTurn ? 'text-red-700' : 'text-blue-700'}`}>
+                          {formatMove(move, true)}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-gray-500">
+                {selectedPieceInView ? 
+                  (typeof selectedPieceInView === 'string' ? 
+                    `選択した持ち駒（${selectedPieceInView}）の打つ先がありません` : 
+                    '選択した駒の移動先がありません') : 
+                  '候補手がありません'}
+              </p>
+            )}
+          </div>
+        </div>
+        )}
+      </div>
+
+      {/* 解析結果の表示 */}
+      {solutionSteps.length > 0 && (
+        <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded">
+          <h3 className="font-semibold mb-2 text-green-800">解析結果</h3>
+          <div className="space-y-1">
+            {solutionSteps.map((step, index) => (
+              <p key={index} className="text-sm">{step}</p>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-6 text-sm text-gray-600">
+        <p>※ 盤面のマスをクリックして選択してから、右側の駒ボタンをクリックして配置してください</p>
+        <p>※ 同じ駒を同じ位置に配置すると、成駒になります</p>
+        <p>※ 持ち駒は空欄（+）をクリックして追加できます</p>
+        <p>※ 大体、7手詰めまでなら解析できます</p>
+      </div>
+
+      {/* エクスポートモーダル */}
+      {showExport && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded shadow-lg p-4 sm:p-6 max-w-lg w-full relative">
+            <button
+              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
+              onClick={() => setShowExport(false)}
+            >閉じる</button>
+            <h3 className="text-xl font-bold mb-4">エクスポート</h3>
+            <textarea
+              className="w-full h-48 sm:h-64 p-2 border rounded font-mono text-sm"
+              value={exportText}
+              readOnly
+            />
+            <div className="mt-4 flex gap-2">
+              <button
+                className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                onClick={handleCopyExport}
+              >コピー</button>
+              <button
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                onClick={() => setShowExport(false)}
+              >閉じる</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* インポートモーダル */}
+      {showImport && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded shadow-lg p-4 sm:p-6 max-w-lg w-full relative">
+            <button
+              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
+              onClick={() => setShowImport(false)}
+            >閉じる</button>
+            <h3 className="text-xl font-bold mb-4">インポート</h3>
+            <p className="text-sm text-gray-600 mb-2">形式: x y 側(S/O) 駒種類</p>
+            <textarea
+              className="w-full h-48 sm:h-64 p-2 border rounded font-mono text-sm"
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder="例:\n1 1 O 香\n5 9 S 王\nCAPTURED: 歩,銀"
+            />
+            <div className="mt-4 flex gap-2">
+              <button
+                className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+                onClick={handleApplyImport}
+              >適用</button>
+              <button
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                onClick={() => setShowImport(false)}
+              >キャンセル</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}
+

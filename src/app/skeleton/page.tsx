@@ -1,6 +1,7 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
+import pako from 'pako';
 
 type CellState = "white" | "yellow";
 
@@ -10,12 +11,11 @@ interface Position {
 }
 
 interface Slot {
-  text: string;
   positions: Position[];
   direction: "horizontal" | "vertical";
   length: number;
-  candidates: string[] | null;
-  confirmedWord: string | null;
+  candidates: string[];              /* 候補単語 */
+  confirmedWord: string | null;      /* 確定した単語 */
 }
 
 interface Intersection{
@@ -25,26 +25,287 @@ interface Intersection{
   horizontalLetterPosition: number;
 }
 
+interface ExportData {
+  words: string;
+  board: CellState[][];
+  boardWidth?: number;
+  boardHeight?: number;
+}
+
+interface CompressedData {
+  words: string;
+  board: {x: number, y: number, w: number, h: number, v: string};
+  boardWidth?: number;
+  boardHeight?: number;
+}
+
 const BOARD_WIDTH = 24;
 const BOARD_HEIGHT = 16;
+
+const createEmptyBoard = (width: number, height: number): CellState[][] =>
+  Array.from({ length: height }, () => Array.from({ length: width }, () => "white" as CellState));
+
+const normalizeBoard = (board: CellState[][], width: number, height: number): CellState[][] =>
+  Array.from({ length: height }, (_, row) =>
+    Array.from({ length: width }, (_, col) => board[row]?.[col] ?? "white")
+  );
 
 export default function SkeletonPage() {
   const [showManual, setShowManual] = useState(false);
   const [words, setWords] = useState("");
-  const [board, setBoard] = useState<CellState[][]>(
-    Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill("white"))
-  );
+  const [boardWidth, setBoardWidth] = useState(BOARD_WIDTH);
+  const [boardHeight, setBoardHeight] = useState(BOARD_HEIGHT);
+  const [boardWidthDraft, setBoardWidthDraft] = useState(BOARD_WIDTH);
+  const [boardHeightDraft, setBoardHeightDraft] = useState(BOARD_HEIGHT);
+  const [board, setBoard] = useState<CellState[][]>(() => createEmptyBoard(BOARD_WIDTH, BOARD_HEIGHT));
   const [isDragging, setIsDragging] = useState(false);
   const [dragMode, setDragMode] = useState<CellState>("white");
   const [unusedWords, setUnusedWords] = useState<string[]>([]);
   const [solvedGrid, setSolvedGrid] = useState<string[][] | null>(null);
+  const [exportUrl, setExportUrl] = useState<string>("");
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [wordStats, setWordStats] = useState<{
+    inputTotal: number;
+    inputByLength: Map<number, number>;
+    boardTotal: number;
+    boardByLength: Map<number, number>;
+  } | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
+
+  const resizeBoard = useCallback((nextWidth: number, nextHeight: number) => {
+    setBoard((currentBoard) => {
+      const resizedBoard = createEmptyBoard(nextWidth, nextHeight);
+      for (let row = 0; row < Math.min(currentBoard.length, nextHeight); row++) {
+        for (let col = 0; col < Math.min(currentBoard[row].length, nextWidth); col++) {
+          resizedBoard[row][col] = currentBoard[row][col];
+        }
+      }
+      return resizedBoard;
+    });
+    setBoardWidth(nextWidth);
+    setBoardHeight(nextHeight);
+    setBoardWidthDraft(nextWidth);
+    setBoardHeightDraft(nextHeight);
+  }, []);
+
+  // データ解凍関数
+  const decompressData = useCallback((compressed: string): ExportData | CompressedData | null => {
+    // 1. URIエンコードされたJSONかチェック (フォールバック or 古い形式)
+    if (compressed.startsWith('%7B') || compressed.startsWith('{')) {
+      try {
+        return JSON.parse(decodeURIComponent(compressed));
+      } catch (e) {
+        console.error('Failed to parse URI-encoded data:', e);
+        return null;
+      }
+    }
+
+    // これ以降はBase64エンコードされていると仮定
+    let binaryString: string;
+    try {
+      // URL-safeなBase64を通常のBase64に戻す
+      let base64 = compressed.replace(/-/g, '+').replace(/_/g, '/');
+
+      // 削除されたパディングを復元
+      while (base64.length % 4) {
+        base64 += '=';
+      }
+
+      binaryString = atob(base64);
+    } catch (e) {
+      console.error('Failed to decode Base64 string:', e);
+      return null;
+    }
+
+    // 2. 新しいpako形式を試す
+    try {
+      // バイナリ文字列をUint8Arrayに変換
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      const restored = pako.inflate(bytes, { to: 'string' });
+      const data = JSON.parse(restored);
+      
+      return data;
+    } catch (pakoError) {
+      // pakoが失敗した場合
+      console.error('Failed to decompress data with pako:', pakoError);
+      return null;
+    }
+  }, []);
+
+  // ページ読み込み時にURLパラメータから状態を復元
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const dataParam = urlParams.get('data');
+    
+    if (dataParam) {
+      try {
+        const data = decompressData(dataParam);
+        
+        if (data) {
+          if (data.words) {
+            setWords(data.words);
+          }
+          if (data.board) {
+            const restoredWidth = data.boardWidth ?? BOARD_WIDTH;
+            const restoredHeight = data.boardHeight ?? BOARD_HEIGHT;
+            const restoredBoard = Array.isArray(data.board)
+              ? data.board
+              : restoreBoard(data.board, restoredWidth, restoredHeight);
+
+            setBoardWidth(restoredWidth);
+            setBoardHeight(restoredHeight);
+            setBoardWidthDraft(restoredWidth);
+            setBoardHeightDraft(restoredHeight);
+            setBoard(normalizeBoard(restoredBoard, restoredWidth, restoredHeight));
+          }
+        }
+      } catch (e) {
+        console.error('Failed to restore data from URL:', e);
+      }
+    }
+  }, [decompressData]);
+
+  // データ圧縮関数
+  const compressData = (data: ExportData): string => {
+      try {
+        // ボードデータを効率的な形式に変換
+        const compressedData = {
+          words: data.words,
+          board: compressBoard(data.board)
+        };
+        
+        const jsonString = JSON.stringify(compressedData);
+        // pakoを使用してzlib互換の圧縮を実行 (Uint8Array)
+        const compressed = pako.deflate(jsonString);
+
+        // Uint8Arrayをbtoaで扱えるバイナリ文字列に変換
+        const binaryString = Array.from(compressed).map(byte => String.fromCharCode(byte)).join('');
+
+        // Base64エンコードし、URL-safeな形式に変換
+        return btoa(binaryString)
+          .replace(/\+/g, '-') // + -> -
+          .replace(/\//g, '_') // / -> _
+          .replace(/=/g, '');  // パディングを削除
+      } catch (e) {
+        console.error('Failed to compress data:', e);
+        // 圧縮に失敗した場合は、フォールバックとして単純なURIエンコードを行う
+        return encodeURIComponent(JSON.stringify(data));
+      }
+  };
+
+  // ボードを効率的に圧縮、復元する関数
+  const compressBoard = (board: CellState[][]): {x: number, y: number, w: number, h: number, v: string} => {
+    // 黄色のマスの範囲を特定
+    let minX = boardWidth, maxX = -1;
+    let minY = boardHeight, maxY = -1;
+    
+    for (let row = 0; row < boardHeight; row++) {
+      for (let col = 0; col < boardWidth; col++) {
+        if (board[row][col] === "yellow") {
+          minX = Math.min(minX, col);
+          maxX = Math.max(maxX, col);
+          minY = Math.min(minY, row);
+          maxY = Math.max(maxY, row);
+        }
+      }
+    }
+    
+    // 黄色のマスがない場合
+    if (maxX === -1) {
+      return {x: 0, y: 0, w: 0, h: 0, v: ""};
+    }
+    
+    const width = maxX - minX + 1;
+    const height = maxY - minY + 1;
+    
+    // 範囲内のデータを文字列に変換
+    let valueString = "";
+    for (let row = minY; row <= maxY; row++) {
+      for (let col = minX; col <= maxX; col++) {
+        valueString += board[row][col] === "yellow" ? "1" : "0";
+      }
+    }
+    
+    return {
+      x: minX,
+      y: minY,
+      w: width,
+      h: height,
+      v: valueString
+    };
+  };
+
+  const restoreBoard = (
+    compressed: {x: number, y: number, w: number, h: number, v: string},
+    width: number,
+    height: number
+  ): CellState[][] => {
+    // 初期化（全て白）
+    const board: CellState[][] = createEmptyBoard(width, height);
+    
+    // データがない場合は白いボードを返す
+    if (compressed.w === 0 || compressed.h === 0 || !compressed.v) {
+      return board;
+    }
+    
+    // 圧縮されたデータを復元
+    let index = 0;
+    for (let row = 0; row < compressed.h; row++) {
+      for (let col = 0; col < compressed.w; col++) {
+        if (index < compressed.v.length) {
+          const boardRow = compressed.y + row;
+          const boardCol = compressed.x + col;
+          
+          // ボード範囲内かチェック
+          if (boardRow >= 0 && boardRow < height && boardCol >= 0 && boardCol < width) {
+            board[boardRow][boardCol] = compressed.v[index] === "1" ? "yellow" : "white";
+          }
+          index++;
+        }
+      }
+    }
+    
+    return board;
+  };
+
+  // エクスポート機能
+  const handleExport = () => {
+    const data = {
+      words: words,
+      board: board,
+      boardWidth: boardWidth,
+      boardHeight: boardHeight
+    };
+    
+    const compressed = compressData(data);
+    const baseUrl = window.location.origin + window.location.pathname;
+    const url = `${baseUrl}?data=${compressed}`;
+    setExportUrl(url);
+    setShowExportModal(true);
+  };
+
+  // クリップボードにコピー
+  const handleCopyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(exportUrl);
+      alert('URLをクリップボードにコピーしました！');
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+      alert('コピーに失敗しました。URLを手動でコピーしてください。');
+    }
+  };
 
   // サンプル挿入用
   const handleSample = () => {
     setWords("かんでんち\nでんわせん\nわしんとん\nかしわ\nわだい");
     // サンプル用のボード設定（十字の形）
-    const newBoard = Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill("white"));
+    const newBoard = createEmptyBoard(boardWidth, boardHeight);
+    const targetRowOffset = Math.max(0, Math.floor((boardHeight - 5) / 2));
+    const targetColOffset = Math.max(0, Math.floor((boardWidth - 5) / 2));
     const sampleBoard = [
       [1, 1, 1, 1, 1],
       [0, 0, 1, 0, 0],
@@ -55,7 +316,11 @@ export default function SkeletonPage() {
     for (let col = 0; col < 5; col++) {
       for (let row = 0; row < 5; row++) {
         if (sampleBoard[row][col] === 1) {
-          newBoard[row + 5][col + 9] = "yellow";
+          const targetRow = row + targetRowOffset;
+          const targetCol = col + targetColOffset;
+          if (targetRow < boardHeight && targetCol < boardWidth) {
+            newBoard[targetRow][targetCol] = "yellow";
+          }
         }
       }
     }
@@ -63,15 +328,132 @@ export default function SkeletonPage() {
     // 解析結果もクリア
     setUnusedWords([]);
     setSolvedGrid(null);
+    setWordStats(null);
     setShowManual(false);
   };
 
   // リセット
   const handleReset = () => {
     setWords("");
-    setBoard(Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill("white")));
+    setBoard(createEmptyBoard(boardWidth, boardHeight));
     setUnusedWords([]);
     setSolvedGrid(null);
+    setWordStats(null);
+  };
+
+  const handleApplyBoardSize = () => {
+    const safeWidth = Number.isFinite(boardWidthDraft) ? boardWidthDraft : BOARD_WIDTH;
+    const safeHeight = Number.isFinite(boardHeightDraft) ? boardHeightDraft : BOARD_HEIGHT;
+    const nextWidth = Math.max(2, Math.min(60, Math.floor(safeWidth)));
+    const nextHeight = Math.max(2, Math.min(60, Math.floor(safeHeight)));
+    resizeBoard(nextWidth, nextHeight);
+    setUnusedWords([]);
+    setSolvedGrid(null);
+    setWordStats(null);
+  };
+
+  const clearAnalysisResult = () => {
+    setUnusedWords([]);
+    setSolvedGrid(null);
+    setWordStats(null);
+  };
+
+  const getBoardGaps = (targetBoard: CellState[][]) => {
+    const height = targetBoard.length;
+    const width = targetBoard[0]?.length ?? 0;
+
+    let hasYellow = false;
+    for (let row = 0; row < height; row++) {
+      for (let col = 0; col < width; col++) {
+        if (targetBoard[row][col] === "yellow") {
+          hasYellow = true;
+          break;
+        }
+      }
+      if (hasYellow) break;
+    }
+
+    let top = 0;
+    while (top < height && targetBoard[top].every((cell) => cell === "white")) {
+      top++;
+    }
+
+    let bottom = 0;
+    while (bottom < height && targetBoard[height - 1 - bottom].every((cell) => cell === "white")) {
+      bottom++;
+    }
+
+    let left = 0;
+    while (left < width && targetBoard.every((row) => row[left] === "white")) {
+      left++;
+    }
+
+    let right = 0;
+    while (right < width && targetBoard.every((row) => row[width - 1 - right] === "white")) {
+      right++;
+    }
+
+    return { top, bottom, left, right, hasYellow };
+  };
+
+  const applyBoardAndSize = (nextBoard: CellState[][]) => {
+    const nextHeight = nextBoard.length;
+    const nextWidth = nextBoard[0]?.length ?? 0;
+    if (nextWidth === 0 || nextHeight === 0) {
+      return;
+    }
+    setBoard(nextBoard);
+    setBoardWidth(nextWidth);
+    setBoardHeight(nextHeight);
+    setBoardWidthDraft(nextWidth);
+    setBoardHeightDraft(nextHeight);
+    clearAnalysisResult();
+  };
+
+  const handleFitBoard = () => {
+    const gaps = getBoardGaps(board);
+    if (!gaps.hasYellow) {
+      return;
+    }
+
+    const nextWidth = boardWidth - gaps.left - gaps.right;
+    const nextHeight = boardHeight - gaps.top - gaps.bottom;
+    const nextBoard = createEmptyBoard(nextWidth, nextHeight);
+
+    for (let row = 0; row < nextHeight; row++) {
+      for (let col = 0; col < nextWidth; col++) {
+        nextBoard[row][col] = board[row + gaps.top][col + gaps.left];
+      }
+    }
+
+    applyBoardAndSize(nextBoard);
+  };
+
+  const handleExpandBoard = () => {
+    const gaps = getBoardGaps(board);
+    if (!gaps.hasYellow) {
+      return;
+    }
+
+    const minGap = Math.min(gaps.top, gaps.bottom, gaps.left, gaps.right);
+    const addTop = gaps.top === minGap ? 1 : 0;
+    const addBottom = gaps.bottom === minGap ? 1 : 0;
+    const addLeft = gaps.left === minGap ? 1 : 0;
+    const addRight = gaps.right === minGap ? 1 : 0;
+
+    const nextWidth = boardWidth + addLeft + addRight;
+    const nextHeight = boardHeight + addTop + addBottom;
+    const nextBoard = createEmptyBoard(nextWidth, nextHeight);
+
+    for (let row = 0; row < boardHeight; row++) {
+      for (let col = 0; col < boardWidth; col++) {
+        if (board[row][col] === "yellow") {
+          nextBoard[row + addTop][col + addLeft] = "yellow";
+        }
+      }
+    }
+
+    applyBoardAndSize(nextBoard);
   };
 
   // マスのクリック
@@ -108,10 +490,10 @@ export default function SkeletonPage() {
     const words: Slot[] = [];
     
     // 横方向をチェック
-    for (let row = 0; row < BOARD_HEIGHT; row++) {
+    for (let row = 0; row < boardHeight; row++) {
       let start = -1;
-      for (let col = 0; col <= BOARD_WIDTH; col++) {
-        if (col < BOARD_WIDTH && board[row][col] === "yellow") {
+      for (let col = 0; col <= boardWidth; col++) {
+        if (col < boardWidth && board[row][col] === "yellow") {
           if (start === -1) start = col;
         } else {
           if (start !== -1 && col - start >= 2) {
@@ -120,11 +502,10 @@ export default function SkeletonPage() {
               positions.push({ row, col: c });
             }
             words.push({
-              text: "",
               positions,
               direction: "horizontal",
               length: col - start,
-              candidates: null,
+              candidates: [],
               confirmedWord: null
             });
           }
@@ -134,10 +515,10 @@ export default function SkeletonPage() {
     }
 
     // 縦方向をチェック
-    for (let col = 0; col < BOARD_WIDTH; col++) {
+    for (let col = 0; col < boardWidth; col++) {
       let start = -1;
-      for (let row = 0; row <= BOARD_HEIGHT; row++) {
-        if (row < BOARD_HEIGHT && board[row][col] === "yellow") {
+      for (let row = 0; row <= boardHeight; row++) {
+        if (row < boardHeight && board[row][col] === "yellow") {
           if (start === -1) start = row;
         } else {
           if (start !== -1 && row - start >= 2) {
@@ -146,11 +527,10 @@ export default function SkeletonPage() {
               positions.push({ row: r, col });
             }
             words.push({
-              text: "",
               positions,
               direction: "vertical",
               length: row - start,
-              candidates: null,
+              candidates: [],
               confirmedWord: null
             });
           }
@@ -180,32 +560,69 @@ export default function SkeletonPage() {
     return intersections;
   };
 
+  // 単語統計を計算
+  const calculateWordStats = (inputWords: string[], slots: Slot[]) => {
+    const inputByLength = new Map<number, number>();
+    const boardByLength = new Map<number, number>();
+
+    // 入力単語の統計
+    inputWords.forEach(word => {
+      const length = word.length;
+      inputByLength.set(length, (inputByLength.get(length) || 0) + 1);
+    });
+
+    // ボードのスロット統計
+    slots.forEach(slot => {
+      const length = slot.length;
+      boardByLength.set(length, (boardByLength.get(length) || 0) + 1);
+    });
+
+    return {
+      inputTotal: inputWords.length,
+      inputByLength,
+      boardTotal: slots.length,
+      boardByLength
+    };
+  };
 
   // 高度な解析実行
   const handleAnalyze = () => {
-    const wordList = words.split(/\r?\n/).map(w => w.trim()).filter(Boolean);
+    const wordList = words.split(/\r?\n/).map((w: string) => w.trim()).filter(Boolean);
     const slots = getConsecutiveCells();
     
-    // バックトラッキングによる制約解法
-    const result = solveConstraints(wordList, slots);
-    
+    // 文字数別に単語を分ける
+    const lengthMap = createLengthMap(wordList);
+
+    // 交差点を事前計算
+    const intersections = findIntersections(slots);
+
+    // 制約解法
+    const result = solveConstraints(lengthMap, slots, intersections);
+
     if (result) {
       // 使われなかった単語
-      const unused = wordList.filter(w => !result.usedWords.has(w));
+      const unused = wordList.filter((w: string) => !result.usedWords.has(w));
       setUnusedWords(unused);
       
       // 解析結果をボードに表示
       setSolvedGrid(result.grid);
+      
+      // 統計情報を計算
+      setWordStats(calculateWordStats(wordList, slots));
     } else {
       // 完全解が見つからない場合でも部分解を試す
       const partialResult = solvePartial(wordList, slots);
       if (partialResult) {
-        const unused = wordList.filter(w => !partialResult.usedWords.has(w));
+        const unused = wordList.filter((w: string) => !partialResult.usedWords.has(w));
         setUnusedWords([...unused, "（部分解析結果）"]);
         setSolvedGrid(partialResult.grid);
+        
+        // 統計情報を計算
+        setWordStats(calculateWordStats(wordList, slots));
       } else {
         setUnusedWords(["解が見つかりませんでした"]);
         setSolvedGrid(null);
+        setWordStats(null);
       }
     }
   };
@@ -254,7 +671,7 @@ export default function SkeletonPage() {
 
   // 部分的な解析（制約を緩和）
   const solvePartial = (wordList: string[], slots: Slot[]): { grid: string[][], usedWords: Set<string> } | null => {
-    const grid: string[][] = Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill(""));
+    const grid: string[][] = Array.from({ length: boardHeight }, () => Array.from({ length: boardWidth }, () => ""));
     const usedWords = new Set<string>();
 
     // 交差点を事前計算
@@ -302,96 +719,123 @@ export default function SkeletonPage() {
   };
 
   // 交点に入る文字を確定し、そこから、Slotに入りうる候補を探していく
-  const intersectionLetter = (intersection: Intersection, lengthMap: Map<number, string[]>) => {
+  const intersectionLetter = (intersection: Intersection) => {
+    // 両方とも確定済みなら何もしない
+    if (intersection.verticalSlots.confirmedWord && intersection.horizontalSlots.confirmedWord) return;
+
     //　縦のスロットに入りうる文字の一覧
-    const verticalCandidates = lengthMap.get(intersection.verticalSlots.length);
-    if (!verticalCandidates) return;
-    const verticalLetters = verticalCandidates.filter(c => c[intersection.verticalLetterPosition]);
+    const verticalLetters = new Set<string>(
+      intersection.verticalSlots.confirmedWord ?
+        [intersection.verticalSlots.confirmedWord[intersection.verticalLetterPosition]] :
+        intersection.verticalSlots.candidates.map(c => c[intersection.verticalLetterPosition])
+    );
+
     // 横のスロットに入りうる文字の一覧
-    const horizontalCandidates = lengthMap.get(intersection.horizontalSlots.length);
-    if (!horizontalCandidates) return;
-    const horizontalLetters = horizontalCandidates.filter(c => c[intersection.horizontalLetterPosition]);
+    const horizontalLetters = new Set<string>(
+      intersection.horizontalSlots.confirmedWord ?
+        [intersection.horizontalSlots.confirmedWord[intersection.horizontalLetterPosition]] :
+        intersection.horizontalSlots.candidates.map(c => c[intersection.horizontalLetterPosition])
+    );
 
     // 交差点の文字を抽出
-    const letters: string[] = [];
-    for (const vLetter of verticalLetters) {
-      for (const hLetter of horizontalLetters) {
-        if (vLetter[intersection.verticalLetterPosition] === hLetter[intersection.horizontalLetterPosition]) {
-          letters.push(vLetter[intersection.verticalLetterPosition]);
-        }
-      }
-    }
+    const letters = verticalLetters.intersection(horizontalLetters);
 
-    // 交点の文字から、候補の単語を抽出する
-    const filteredVerticalCandidates = verticalCandidates.filter(word => 
-      letters.includes(word[intersection.verticalLetterPosition])
-    );
-    const filteredHorizontalCandidates = horizontalCandidates.filter(word => 
-      letters.includes(word[intersection.horizontalLetterPosition])
-    );
-
-    // 候補を更新
-    if (intersection.verticalSlots.candidates){
+    // まだ未確定なら情報を絞る
+    if (!intersection.verticalSlots.confirmedWord){
+      // 交点の文字から、候補の単語を抽出する
       intersection.verticalSlots.candidates = intersection.verticalSlots.candidates.filter(word => 
-        filteredVerticalCandidates.includes(word)
+        letters.has(word[intersection.verticalLetterPosition])
       );
-    }else{
-      intersection.verticalSlots.candidates = filteredVerticalCandidates;
     }
-    if (intersection.horizontalSlots.candidates){
+
+    if (!intersection.horizontalSlots.confirmedWord){
+      // 交点の文字から、候補の単語を抽出する
       intersection.horizontalSlots.candidates = intersection.horizontalSlots.candidates.filter(word => 
-        filteredHorizontalCandidates.includes(word)
+        letters.has(word[intersection.horizontalLetterPosition])
       );
-    }else{ 
-      intersection.horizontalSlots.candidates = filteredHorizontalCandidates;
-    }
+    } 
+
   }
 
-  // 各スロットに確定した文字を探して入れていく
-  const solveConstraints = (wordList: string[], slots: Slot[]): { grid: string[][], usedWords: Set<string> } | null => {
-    const grid: string[][] = Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill(""));
-
-    // 交差点を事前計算
-    const intersections = findIntersections(slots);
-
-    // 文字数別に単語を分ける
+  const createLengthMap = (wordList: string[]) => {
     const lengthMap = new Map<number, string[]>();
     for (const word of wordList) {
       const length = word.length;
       if (!lengthMap.has(length)) {
-        lengthMap.set(length, []);
+        lengthMap.set(length, [word]);
+      } else {
+        lengthMap.get(length)!.push(word);
       }
-      lengthMap.get(length)!.push(word);
+    }
+    return lengthMap;
+  }
+
+  const hasSameWordIntersectionConflict = (targetSlot: Slot, word: string, intersections: Intersection[]): boolean => {
+    return intersections.some((intersection) => {
+      if (intersection.horizontalSlots === targetSlot) {
+        return intersection.verticalSlots.confirmedWord === word;
+      }
+      if (intersection.verticalSlots === targetSlot) {
+        return intersection.horizontalSlots.confirmedWord === word;
+      }
+      return false;
+    });
+  };
+
+
+  // 各スロットに確定した文字を探して入れていく
+  const solveConstraints = (lengthMap: Map<number, string[]>, slots: Slot[], intersections: Intersection[]):
+   { grid: string[][], usedWords: Set<string> } | null => {
+    const grid: string[][] = Array.from({ length: boardHeight }, () => Array.from({ length: boardWidth }, () => ""));
+
+    // 各スロットに候補を設定
+    for (const slot of slots) {
+      slot.candidates = lengthMap.get(slot.length) ?? [];
     }
 
     // すべての交点に対して、交差する文字から候補を絞る
     for (const intersection of intersections) {
-      intersectionLetter(intersection, lengthMap);
+      intersectionLetter(intersection);
     }
 
     // スロットのうち、候補が1個しかないものをuseListに追加する
     // 確定できる単語を順次配置していく（無限ループ）
     while (true) {
-      const trashWords : string[] = [];
+      const trashSlots : Slot[] = [];
+      let hasNewConfirmed = false;
       
       // 候補が1個しかないスロットを確定
       slots.forEach(slot => {
-      if (slot.confirmedWord == null && slot.candidates && slot.candidates.length === 1) {
-        slot.confirmedWord = slot.candidates[0];
-        const word = slot.candidates[0];
-        trashWords.push(word);
-      }
+        if (slot.confirmedWord == null && slot.candidates.length === 1) {
+          const candidate = slot.candidates[0];
+          if (hasSameWordIntersectionConflict(slot, candidate, intersections)) {
+            return;
+          }
+          if (trashSlots.includes(slot)) return;
+          slot.confirmedWord = candidate;
+          trashSlots.push(slot);
+          hasNewConfirmed = true;
+        }
       });
 
-      for(const word of trashWords) {
-        for (const slot of slots) {
-          if (slot.confirmedWord === null && slot.candidates) {
-            slot.candidates = slot.candidates.filter(candidate => candidate !== word);
-          }
+      if (!hasNewConfirmed) {
+        break; // これ以上確定できる単語がない
+      }
+
+      // 確定したスロットを持つ交点から絞り込みをする
+      for (const intersection of intersections) {
+        if (trashSlots.some(slot => slot === intersection.verticalSlots || slot === intersection.horizontalSlots)) {
+          intersectionLetter(intersection);
         }
       }
-      if (trashWords.length === 0) {
-        break; // これ以上確定できる単語がない
+
+      // 確定した単語を候補から除外
+      for (const s of slots) {
+        if (s.confirmedWord === null) {
+          s.candidates = s.candidates.filter(
+            candidate => trashSlots.every(trash => trash.confirmedWord !== candidate)
+          );
+        }
       }
     }
 
@@ -405,6 +849,7 @@ export default function SkeletonPage() {
     }
 
     return { grid, usedWords };
+
   };
 
   // 単語を配置
@@ -419,16 +864,8 @@ export default function SkeletonPage() {
   const countConstraints = (slot: Slot, intersections: Intersection[]): number => {
     let count = 0;
     for (const intersection of intersections) {
-      // このスロットが交差点に関わっているかチェック
-      const hasIntersection = slot.positions.some(pos => 
-        (intersection.horizontalSlots === slot && 
-         pos.row === intersection.verticalSlots.positions[intersection.verticalLetterPosition].row &&
-         pos.col === intersection.verticalSlots.positions[intersection.verticalLetterPosition].col) ||
-        (intersection.verticalSlots === slot && 
-         pos.row === intersection.horizontalSlots.positions[intersection.horizontalLetterPosition].row &&
-         pos.col === intersection.horizontalSlots.positions[intersection.horizontalLetterPosition].col)
-      );
-      if (hasIntersection) {
+      // このスロットが交差点のペアに含まれているかを直接チェックする
+      if (intersection.horizontalSlots === slot || intersection.verticalSlots === slot) {
         count++;
       }
     }
@@ -437,14 +874,19 @@ export default function SkeletonPage() {
 
   return (
     <main className="max-w-4xl mx-auto p-6">
+      <div className="mb-4">
+        <Link href="/" className="text-blue-500 hover:text-blue-700 text-sm">
+          ← トップに戻る
+        </Link>
+      </div>
+      <h1 className="text-2xl font-bold mb-4">スケルトンソルバー</h1>
       <div className="flex items-center mb-4 gap-2">
         <button
           className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
           onClick={() => setShowManual(true)}
         >使い方</button>
-        <Link href="/" className="inline-block px-4 py-2 bg-gray-100 rounded hover:bg-gray-200">トップに戻る</Link>
       </div>
-      
+
       {showManual && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
           <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative">
@@ -468,16 +910,56 @@ export default function SkeletonPage() {
         </div>
       )}
 
-      <h2 className="text-2xl font-bold mb-4">スケルトンソルバー</h2>
-      
+      {/* エクスポートモーダル */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded shadow-lg p-6 max-w-2xl w-full relative">
+            <button
+              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
+              onClick={() => setShowExportModal(false)}
+            >閉じる</button>
+            <h3 className="text-xl font-bold mb-4">エクスポート</h3>
+            <p className="mb-4 text-sm text-gray-600">
+              以下のURLを共有することで、現在の盤面と単語の状態を他の人と共有できます。
+            </p>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                共有URL:
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={exportUrl}
+                  readOnly
+                  className="flex-1 p-2 border rounded bg-gray-50 text-sm"
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                />
+                <button
+                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                  onClick={handleCopyToClipboard}
+                >
+                  コピー
+                </button>
+              </div>
+            </div>
+            <div className="text-sm text-gray-500">
+              <p>※ URLには盤面の配置と入力された単語が含まれています</p>
+              <p>※ 解析結果は含まれませんので、共有先で再度解析を実行してください</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mb-4">
         <h3 className="font-semibold mb-2">単語入力</h3>
-        <textarea
-          className="w-full h-32 p-2 border rounded"
-          value={words}
-          onChange={e => setWords(e.target.value)}
-          placeholder="単語を改行で区切って入力してください"
-        />
+        <div className="flex flex-wrap items-start gap-3">
+          <textarea
+            className="h-32 min-w-[320px] flex-1 p-2 border rounded"
+            value={words}
+            onChange={e => setWords(e.target.value)}
+            placeholder="単語を改行で区切って入力してください"
+          />
+        </div>
       </div>
 
       <div className="mb-4 flex gap-2">
@@ -489,10 +971,56 @@ export default function SkeletonPage() {
           className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
           onClick={handleAnalyze}
         >解析</button>
+        <button
+          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+          onClick={handleExport}
+        >エクスポート</button>
       </div>
 
       <div className="mb-4">
         <h3 className="font-semibold mb-2">ボード（クリック・ドラッグで黄色/白を切り替え）</h3>
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
+          <label className="flex items-center gap-1">
+            <span className="font-medium">横</span>
+            <input
+              type="number"
+              min={10}
+              max={60}
+              value={boardWidthDraft}
+              onChange={(e) => setBoardWidthDraft(Number(e.target.value))}
+              className="w-20 rounded border px-2 py-1"
+            />
+          </label>
+          <label className="flex items-center gap-1">
+            <span className="font-medium">縦</span>
+            <input
+              type="number"
+              min={10}
+              max={60}
+              value={boardHeightDraft}
+              onChange={(e) => setBoardHeightDraft(Number(e.target.value))}
+              className="w-20 rounded border px-2 py-1"
+            />
+          </label>
+          <button
+            className="h-[30px] rounded bg-blue-600 px-3 text-white hover:bg-blue-700"
+            onClick={handleApplyBoardSize}
+          >
+            適用
+          </button>
+          <button
+            className="h-[30px] rounded bg-slate-600 px-3 text-white hover:bg-slate-700"
+            onClick={handleFitBoard}
+          >
+            ぴったり
+          </button>
+          <button
+            className="h-[30px] rounded bg-cyan-700 px-3 text-white hover:bg-cyan-800"
+            onClick={handleExpandBoard}
+          >
+            広げる
+          </button>
+        </div>
         <div 
           ref={boardRef}
           className="inline-block border-2 border-gray-400 select-none"
@@ -517,6 +1045,39 @@ export default function SkeletonPage() {
           ))}
         </div>
       </div>
+
+      {/* 統計情報表示 */}
+      {wordStats && (
+        <div className="mb-4 p-4 border rounded bg-blue-50">
+          <h3 className="font-semibold mb-2">単語統計</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <h4 className="font-medium text-sm mb-1">入力単語 (総数: {wordStats.inputTotal}個)</h4>
+              <div className="text-sm">
+                {Array.from(wordStats.inputByLength.entries())
+                  .sort(([a], [b]) => a - b)
+                  .map(([length, count]) => (
+                    <span key={length} className="inline-block mr-3">
+                      {length}文字: {count}個
+                    </span>
+                  ))}
+              </div>
+            </div>
+            <div>
+              <h4 className="font-medium text-sm mb-1">ボードのマス (総数: {wordStats.boardTotal}個)</h4>
+              <div className="text-sm">
+                {Array.from(wordStats.boardByLength.entries())
+                  .sort(([a], [b]) => a - b)
+                  .map(([length, count]) => (
+                    <span key={length} className="inline-block mr-3">
+                      {length}文字: {count}個
+                    </span>
+                  ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {unusedWords.length > 0 && (
         <div>

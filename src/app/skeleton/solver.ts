@@ -249,17 +249,17 @@ export const solveConstraints = (wordList: string[], slots: Word[], boardWidth: 
       };
     }
 
-    if (slotIndex >= slots.length) {
+    if (slotIndex >= sortedSlots.length) {
       return true; // 全スロット埋まった（完全解）
     }
 
-    const slot = slots[slotIndex];
+    const slot = sortedSlots[slotIndex].slot;
     const length = slot.positions.length;
     const candidates = wordList.filter(w => w.length === length && !usedWords.has(w));
 
     for (const word of candidates) {
       // 制約チェック：交差部分の文字が一致するか
-      if (isValidPlacement(slot, word, grid, intersections, slotIndex)) {
+      if (isValidPlacement(slot, word, grid, intersections, sortedSlots[slotIndex].index)) {
         // 配置を試す
         placeWord(slot, word, grid);
         usedWords.add(word);
