@@ -1,63 +1,9 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
+import { matchAnagram, matchNankuro } from "./search";
 
 type DicEntry = { name: string; file: string };
-
-type PatternElement =
-  | { type: "char"; value: string }
-  | { type: "any" }
-  | { type: "set"; values: string[] };
-
-function parseAnagramPattern(pattern: string): PatternElement[] {
-  const elems: PatternElement[] = [];
-  let i = 0;
-  while (i < pattern.length) {
-    if (pattern[i] === ".") {
-      elems.push({ type: "any" });
-      i++;
-    } else if (pattern[i] === "[") {
-      const end = pattern.indexOf("]", i + 1);
-      if (end === -1) {
-        elems.push({ type: "char", value: pattern[i] });
-        i++;
-      } else {
-        const values = pattern.slice(i + 1, end).split("");
-        elems.push({ type: "set", values });
-        i = end + 1;
-      }
-    } else {
-      elems.push({ type: "char", value: pattern[i] });
-      i++;
-    }
-  }
-  return elems;
-}
-
-function elemMatches(elem: PatternElement, ch: string): boolean {
-  if (elem.type === "any") return true;
-  if (elem.type === "char") return elem.value === ch;
-  return elem.values.includes(ch);
-}
-
-function matchAnagram(pattern: PatternElement[], word: string): boolean {
-  if (pattern.length !== word.length) return false;
-  const chars = word.split("");
-  const used = new Array(chars.length).fill(false);
-  function backtrack(pi: number): boolean {
-    if (pi === pattern.length) return true;
-    const elem = pattern[pi];
-    for (let ci = 0; ci < chars.length; ci++) {
-      if (!used[ci] && elemMatches(elem, chars[ci])) {
-        used[ci] = true;
-        if (backtrack(pi + 1)) return true;
-        used[ci] = false;
-      }
-    }
-    return false;
-  }
-  return backtrack(0);
-}
 
 function parseCSV(text: string): string[][] {
   return text
@@ -93,7 +39,7 @@ const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 export default function DictionaryPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showHelp, setShowHelp] = useState(false);
-  const [searchType, setSearchType] = useState<"partial" | "regex" | "anagram">("partial");
+  const [searchType, setSearchType] = useState<"partial" | "regex" | "anagram" | "nankuro">("partial");
   const [searchText, setSearchText] = useState("");
   const [dicList, setDicList] = useState<DicEntry[]>([]);
   const [selectedDic, setSelectedDic] = useState<string>("");
@@ -203,8 +149,9 @@ export default function DictionaryPage() {
         if (searchType === "partial") {
           hit = cell.includes(searchText);
         } else if (searchType === "anagram") {
-          const pattern = parseAnagramPattern(searchText);
-          hit = matchAnagram(pattern, cell);
+          hit = matchAnagram(searchText, cell);
+        } else if (searchType === "nankuro") {
+          hit = matchNankuro(searchText, cell);
         } else {
           try {
             const re = new RegExp(searchText);
@@ -238,22 +185,6 @@ export default function DictionaryPage() {
     } else {
       setSelectedCols(new Array(headers.length).fill(true));
     }
-  };
-
-  // 列コピー（選択カラムをコピー）
-  const handleColCopy = () => {
-    const activeCols = selectedCols.every((v) => !v)
-      ? headers.map(() => true)
-      : selectedCols;
-
-    const activeColIndices = headers
-      .map((_, ci) => ci)
-      .filter((ci) => activeCols[ci]);
-
-    const lines = rows.map((row) =>
-      activeColIndices.map((ci) => row[ci] ?? "").join(",")
-    );
-    navigator.clipboard.writeText(lines.join("\n")).catch(() => {});
   };
 
   const visibleRows = rows
@@ -358,9 +289,12 @@ export default function DictionaryPage() {
             <li>
               <span className="font-semibold">アナグラム</span>：文字の並び替えで一致する行を検索します。<code className="bg-white px-1 rounded border">.</code>は任意の1文字、<code className="bg-white px-1 rounded border">[あいう]</code>はいずれか1文字にマッチします。
             </li>
+            <li>
+              <span className="font-semibold">ナンクロ</span>：完全一致で検索します。<code className="bg-white px-1 rounded border">.</code>は任意の1文字、<code className="bg-white px-1 rounded border">*</code>は0文字以上の任意の文字列、<code className="bg-white px-1 rounded border">1</code>から<code className="bg-white px-1 rounded border">9</code>は任意の1文字で、同じ数字は同じ文字に一致します。<code className="bg-white px-1 rounded border">[あいう]</code>は括弧内のどれか1文字に一致します。数字そのものは検索できません。
+            </li>
             <li>カラム見出しをクリックすると、そのカラムだけを検索対象に絞れます（複数選択可）。</li>
             <li>カラム見出し右端の <span className="inline-block align-middle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline h-4 w-4"><rect x="9" y="9" width="10" height="10" rx="2"/><path d="M5 15V7a2 2 0 0 1 2-2h8"/></svg></span> アイコンを押すと、現在表示中のその列の値をクリップボードにコピーします。</li>
-            <li>「全選択」で全カラムを選択、「列コピー」で選択中カラムの全データをコピーします。</li>
+            <li>「全選択」で全カラムを選択、もう一度押すと全解除します。</li>
           </ol>
         </div>
       )}
@@ -398,6 +332,16 @@ export default function DictionaryPage() {
               onChange={() => setSearchType("anagram")}
             />
             アナグラム
+          </label>
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input
+              type="radio"
+              name="searchType"
+              value="nankuro"
+              checked={searchType === "nankuro"}
+              onChange={() => setSearchType("nankuro")}
+            />
+            ナンクロ
           </label>
         </div>
 
@@ -464,7 +408,7 @@ export default function DictionaryPage() {
         </div>
       )}
 
-      {/* 全選択 / コピーボタン */}
+      {/* 全選択ボタン */}
       {headers.length > 0 && (
         <div className="flex gap-3 mb-3">
           <button
@@ -472,12 +416,6 @@ export default function DictionaryPage() {
             className="bg-gray-200 hover:bg-gray-300 px-4 py-1.5 rounded transition-colors text-sm font-semibold"
           >
             {hasAnySelected ? "全解除" : "全選択"}
-          </button>
-          <button
-            onClick={handleColCopy}
-            className="bg-gray-200 hover:bg-gray-300 px-4 py-1.5 rounded transition-colors text-sm font-semibold"
-          >
-            列コピー
           </button>
         </div>
       )}
