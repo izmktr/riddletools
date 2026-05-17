@@ -23,8 +23,6 @@ interface Coordinate {
   y: number;
 }
 
-const ThinWallGitter = 1; // 壁の細さを定義
-
 export default function MazePage() {
   const [width, setWidth] = useState(5);
   const [height, setHeight] = useState(5);
@@ -333,19 +331,19 @@ export default function MazePage() {
   }, [mode]);
 
   const getCellStyle = (cell: Cell) => {
-    const baseStyle = "w-12 h-12 flex items-center justify-center text-lg font-bold";
+    const baseStyle = "w-12 h-12 flex items-center justify-center font-bold";
     const interactiveStyle = !isWallMode() ? "cursor-pointer" : "cursor-default";
     const hoverStyle = !isWallMode() ? "hover:bg-gray-100" : "";
     
     switch (cell.type) {
       case 'blocked':
-        return `${baseStyle} ${interactiveStyle} bg-black text-white z-3`;
+        return `${baseStyle} ${interactiveStyle} bg-black text-white text-lg z-3`;
       case 'start':
-        return `${baseStyle} ${interactiveStyle} bg-white text-red-600`;
+        return `${baseStyle} ${interactiveStyle} bg-white text-red-600 text-3xl leading-none`;
       case 'goal':
-        return `${baseStyle} ${interactiveStyle} bg-white text-blue-600`;
+        return `${baseStyle} ${interactiveStyle} bg-white text-blue-600 text-3xl leading-none`;
       default:
-        return `${baseStyle} ${interactiveStyle} bg-white ${hoverStyle}`;
+        return `${baseStyle} ${interactiveStyle} bg-white text-lg ${hoverStyle}`;
     }
   };
 
@@ -400,8 +398,13 @@ export default function MazePage() {
     // このセルがパスに含まれているかチェック
     const isInPath = solutionPath.some(coord => coord.x === colIndex && coord.y === rowIndex);
     const pathIndex = solutionPath.findIndex(coord => coord.x === colIndex && coord.y === rowIndex);
-    const rightPos = cellEdges.right !== 'wall' ? 1 - ThinWallGitter : 1;
-    const bottomPos = cellEdges.bottom !== 'wall' ? 1 : 1;
+    const rightOffsetClass = isOuterRight || cellEdges.right === 'wall' ? '-right-1' : 'right-0';
+    const bottomOffsetClass = isOuterBottom || cellEdges.bottom === 'wall' ? '-bottom-1' : 'bottom-0';
+    const rightEdgeZIndex = isOuterRight || cellEdges.right === 'wall' ? 10 : 5;
+    const bottomEdgeZIndex = isOuterBottom || cellEdges.bottom === 'wall' ? 10 : 5;
+    const shiftRightGridInWallMode = wallModeActive && !isOuterRight && cellEdges.right === 'normal';
+    const shiftBottomGridInWallMode = wallModeActive && !isOuterBottom && cellEdges.bottom === 'normal';
+    const cellZIndex = cell.type === 'start' || cell.type === 'goal' ? 20 : 3;
 
     return (
       <div key={`${rowIndex}-${colIndex}`} className="relative">
@@ -423,21 +426,41 @@ export default function MazePage() {
         
         {/* 右の辺 */}
         <div
-          className={`absolute -right-${rightPos} top-0 bottom-0 ${getWallThickness(cellEdges.right, isOuterRight, 'vertical')} ${
+          className={`absolute ${rightOffsetClass} top-0 bottom-0 ${getWallThickness(cellEdges.right, isOuterRight, 'vertical')} ${
             wallModeActive && !isOuterRight ? 'cursor-pointer' : 'cursor-default'
           } ${getWallStyle(cellEdges.right, isOuterRight)}`}
           onClick={() => wallModeActive && !isOuterRight && handleWallClick(rowIndex, colIndex, 'right')}
-          style={{ zIndex: cellEdges.right === 'wall' ? 10 : 5 }}
+          style={{
+            zIndex: rightEdgeZIndex,
+            transform: shiftRightGridInWallMode ? 'translateX(1px)' : undefined
+          }}
         />
+        {wallModeActive && !isOuterRight && (
+          <div
+            className="absolute -right-2 top-0 bottom-0 w-4 cursor-pointer bg-transparent"
+            onClick={() => handleWallClick(rowIndex, colIndex, 'right')}
+            style={{ zIndex: 20 }}
+          />
+        )}
         
         {/* 下の辺 */}
         <div
-          className={`absolute -bottom-${bottomPos} left-0 right-0 ${getWallThickness(cellEdges.bottom, isOuterBottom, 'horizontal')} ${
+          className={`absolute ${bottomOffsetClass} left-0 right-0 ${getWallThickness(cellEdges.bottom, isOuterBottom, 'horizontal')} ${
             wallModeActive && !isOuterBottom ? 'cursor-pointer' : 'cursor-default'
           } ${getWallStyle(cellEdges.bottom, isOuterBottom)}`}
           onClick={() => wallModeActive && !isOuterBottom && handleWallClick(rowIndex, colIndex, 'bottom')}
-          style={{ zIndex: cellEdges.bottom === 'wall' ? 10 : 5 }}
+          style={{
+            zIndex: bottomEdgeZIndex,
+            transform: shiftBottomGridInWallMode ? 'translateY(1px)' : undefined
+          }}
         />
+        {wallModeActive && !isOuterBottom && (
+          <div
+            className="absolute -bottom-2 left-0 right-0 h-4 cursor-pointer bg-transparent"
+            onClick={() => handleWallClick(rowIndex, colIndex, 'bottom')}
+            style={{ zIndex: 20 }}
+          />
+        )}
         
         {/* パスの線を描画 */}
         {isInPath && pathIndex > 0 && (
@@ -489,7 +512,7 @@ export default function MazePage() {
         <div
           className={getCellStyle(cell)}
           onClick={() => !wallModeActive && handleCellClick(rowIndex, colIndex)}
-          style={{ zIndex: 3 }}
+          style={{ zIndex: cellZIndex }}
         >
           {getCellContent(cell)}
         </div>
