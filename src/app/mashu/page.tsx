@@ -57,69 +57,7 @@ type HypothesisAssignment = {
   direction: 0 | 1 | 2 | 3;
   state: LineState;
 };
-type HypothesisChoice = HypothesisAssignment[];
-type HypothesisKind = "black" | "white" | "terminal";
-type HypothesisCandidate = {
-  x: number;
-  y: number;
-  choices: HypothesisChoice[];
-};
-type GridCoord = {
-  x: number;
-  y: number;
-};
-type ReanalysisControl = {
-  startedAt: number;
-  lastYieldAt: number;
-  lastProgressAt: number;
-  lastFieldUpdateAt: number;
-  nodes: number;
-  maxNodes: number;
-  maxMs: number;
-};
-
-const REANALYSIS_MAX_NODES = 100000;
-const REANALYSIS_MAX_MS = 60000;
-const REANALYSIS_FIELD_UPDATE_INTERVAL_MS = 200;
-const SHOULD_YIELD_IN_REANALYSIS = process.env.NODE_ENV !== "test";
 const waitForNextTick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
-
-// 再解析候補のスコアリング基準はここで一元管理する。
-const HYPOTHESIS_SCORING = {
-  // 周辺の確定状況を見る範囲（2なら 5x5）。
-  neighborhoodRadius: 2,
-  // 制約スコア1点あたりの重み。
-  constraintWeight: 1000,
-  // 前回解析座標から遠い候補に与える距離ペナルティの重み。
-  distancePenaltyWeight: 100,
-  byKind: {
-    black: {
-      // 候補種別そのものの優先度。
-      baseScore: 2000,
-      // no-line の本数ごとの加点（キーにない本数は defaultConstraintScore を使う）。
-      noLineConstraintScore: {
-        0: 4,
-        1: 2,
-      },
-      defaultConstraintScore: 0,
-    },
-    white: {
-      baseScore: 2000,
-      noLineConstraintScore: {},
-      defaultConstraintScore: 2,
-    },
-    terminal: {
-      baseScore: 2000,
-      noLineConstraintScore: {
-        0: 3,
-        1: 2,
-      },
-      defaultConstraintScore: 0,
-    },
-  },
-} as const;
-
-class ReanalysisLimitError extends Error {}
 
 type TerminalPair = {
   a: string;
@@ -1512,289 +1450,34 @@ export default function MashuPage() {
   };
 
   const solveDeterministically = (newField: Field) => {
-    let outerChanged = true;
-    while (outerChanged) {
-      // 1～5: 決定論的な内側ループ
+    runInnerAnalysis(newField);
+  };
+
+  const solveByContradiction = (newField: Field): boolean => {
+    let contradictionChanged = true;
+    let hadContradictionProgress = false;
+
+    while (contradictionChanged) {
       runInnerAnalysis(newField);
-      if (newField.isSolved()) break;
+      if (newField.isSolved()) {
+        return true;
+      }
 
-      // 解析の最後：背理法フェーズ（黒・白・終端マスへの仮定→矛盾検証）
-      outerChanged = analyzeByContradiction(newField);
-    }
-  };
-
-  const countConfirmedCellsAround = (newField: Field, centerX: number, centerY: number): number => {
-    let confirmedCount = 0;
-    const radius = HYPOTHESIS_SCORING.neighborhoodRadius;
-
-    for (let dy = -radius; dy <= radius; dy++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        const x = centerX + dx;
-        const y = centerY + dy;
-
-        if (x < 0 || x >= width || y < 0 || y >= height) {
-          confirmedCount++;
-          continue;
-        }
-
-        const mark = newField.getCellMark(x, y);
-        const shapeState = newField.boardState[y]?.[x];
-        if (mark !== null || shapeState !== "undecided") {
-          confirmedCount++;
-        }
+      contradictionChanged = analyzeByContradiction(newField);
+      if (contradictionChanged) {
+        hadContradictionProgress = true;
       }
     }
 
-    return confirmedCount;
+    return hadContradictionProgress;
   };
 
-  const scoreHypothesisCandidate = (
-    newField: Field,
-    x: number,
-    y: number,
-    kind: HypothesisKind,
-    previousCoord: GridCoord | null
-  ): number => {
-    const lines = newField.getSurroundingLines(x, y);
-    const noLineCount = lines.filter(v => v === "no-line").length;
-    const confirmedCount = countConfirmedCellsAround(newField, x, y);
-    const scoring = HYPOTHESIS_SCORING.byKind[kind];
-    const mappedConstraint =
-      scoring.noLineConstraintScore[
-        noLineCount as keyof typeof scoring.noLineConstraintScore
-      ];
-    const constraintScore = mappedConstraint ?? scoring.defaultConstraintScore;
-    const distancePenalty = previousCoord
-      ? (Math.abs(previousCoord.x - x) + Math.abs(previousCoord.y - y)) *
-        HYPOTHESIS_SCORING.distancePenaltyWeight
-      : 0;
-
-    return (
-      scoring.baseScore +
-      constraintScore * HYPOTHESIS_SCORING.constraintWeight +
-      confirmedCount -
-      distancePenalty
-    );
-  };
-
-  const createWhiteChoices = (newField: Field, x: number, y: number): HypothesisChoice[] => {
-    const lines = newField.getSurroundingLines(x, y);
-    const choices: HypothesisChoice[] = [];
-
-    const tryAddChoice = (directionA: 0 | 1 | 2 | 3, directionB: 0 | 1 | 2 | 3) => {
-      const lineA = lines[directionA];
-      const lineB = lines[directionB];
-      const opposite1 = ([2, 3, 0, 1] as const)[directionA];
-      const opposite2 = ([2, 3, 0, 1] as const)[directionB];
-
-      if (lineA === "no-line" || lineB === "no-line") return;
-      if (lineA === "line" && lineB === "line") {
-        choices.push([]);
-        return;
-      }
-
-      const assignments: HypothesisAssignment[] = [];
-      if (lineA !== "line") assignments.push({ x, y, direction: directionA, state: "line" });
-      if (lineB !== "line") assignments.push({ x, y, direction: directionB, state: "line" });
-      if (lineA !== "line") assignments.push({ x, y, direction: opposite1, state: "no-line" });
-      if (lineB !== "line") assignments.push({ x, y, direction: opposite2, state: "no-line" });
-      choices.push(assignments);
-    };
-
-    tryAddChoice(0, 2);
-    tryAddChoice(1, 3);
-
-    return choices.filter(choice => choice.length > 0);
-  };
-
-  const createBlackChoices = (newField: Field, x: number, y: number): HypothesisChoice[] => {
-    const lines = newField.getSurroundingLines(x, y);
-    const choices: HypothesisChoice[] = [];
-    const turns: Array<[0 | 1 | 2 | 3, 0 | 1 | 2 | 3]> = [
-      [0, 1],
-      [1, 2],
-      [2, 3],
-      [3, 0],
-    ];
-
-    for (const [lineA, lineB] of turns) {
-      const oppositeA = ([2, 3, 0, 1] as const)[lineA];
-      const oppositeB = ([2, 3, 0, 1] as const)[lineB];
-      if (lines[lineA] === "no-line" || lines[lineB] === "no-line") continue;
-
-      const assignments: HypothesisAssignment[] = [];
-      if (lines[lineA] !== "line") assignments.push({ x, y, direction: lineA, state: "line" });
-      if (lines[lineB] !== "line") assignments.push({ x, y, direction: lineB, state: "line" });
-      if (lines[oppositeA] !== "no-line") assignments.push({ x, y, direction: oppositeA, state: "no-line" });
-      if (lines[oppositeB] !== "no-line") assignments.push({ x, y, direction: oppositeB, state: "no-line" });
-      choices.push(assignments);
-    }
-
-    return choices.filter(choice => choice.length > 0);
-  };
-
-  const createTerminalChoices = (newField: Field, x: number, y: number): HypothesisChoice[] => {
-    const lines = newField.getSurroundingLines(x, y);
-    const choices: HypothesisChoice[] = [];
-
-    for (const direction of [0, 1, 2, 3] as const) {
-      if (lines[direction] !== "undecided") continue;
-      choices.push([{ x, y, direction, state: "line" }]);
-    }
-
-    return choices;
-  };
-
-  const findHypothesisCandidate = (
-    newField: Field,
-    previousCoord: GridCoord | null
-  ): HypothesisCandidate | null => {
-    let bestCandidate: HypothesisCandidate | null = null;
-    let bestScore = -1;
-
-    const considerCandidate = (
-      x: number,
-      y: number,
-      kind: HypothesisKind,
-      choices: HypothesisChoice[]
-    ) => {
-      if (choices.length === 0) return;
-      const score = scoreHypothesisCandidate(newField, x, y, kind, previousCoord);
-      if (score > bestScore) {
-        bestScore = score;
-        bestCandidate = { x, y, choices };
-      }
-    };
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const mark = newField.getCellMark(x, y);
-        const lines = newField.getSurroundingLines(x, y);
-        const lineCount = lines.filter(v => v === "line").length;
-
-        if (mark === "black" && lineCount < 2) {
-          considerCandidate(x, y, "black", createBlackChoices(newField, x, y));
-        } else if (mark === "white" && lineCount < 2) {
-          considerCandidate(x, y, "white", createWhiteChoices(newField, x, y));
-        } else if (lineCount === 1) {
-          considerCandidate(x, y, "terminal", createTerminalChoices(newField, x, y));
-        }
-      }
-    }
-
-    return bestCandidate;
-  };
-
-  const runReanalysis = async (
-    newField: Field,
-    callbacks: {
-      onProgress?: (message: string) => void;
-      onFieldUpdate?: (snapshot: Field) => void;
-    } = {},
-    depth: number = 0,
-    previousCoord: GridCoord | null = null,
-    control?: ReanalysisControl
-  ): Promise<Field> => {
-    const activeControl =
-      control ?? {
-        startedAt: Date.now(),
-        lastYieldAt: Date.now(),
-        lastProgressAt: 0,
-        lastFieldUpdateAt: 0,
-        nodes: 0,
-        maxNodes: REANALYSIS_MAX_NODES,
-        maxMs: REANALYSIS_MAX_MS,
-      };
-
-    activeControl.nodes++;
-    if (activeControl.nodes > activeControl.maxNodes) {
-      throw new ReanalysisLimitError("再解析が上限に達しました。盤面を減らすか、ヒントを増やしてください");
-    }
-    if (Date.now() - activeControl.startedAt > activeControl.maxMs) {
-      throw new ReanalysisLimitError("再解析に時間がかかりすぎています。盤面を減らすか、ヒントを増やしてください");
-    }
-
-    if (callbacks.onProgress && depth === 0) {
-      callbacks.onProgress(`解析中... 深さ ${depth} で処理中`);
-      activeControl.lastProgressAt = Date.now();
-    }
-
-    const now = Date.now();
-    if (SHOULD_YIELD_IN_REANALYSIS && now - activeControl.lastYieldAt >= 40) {
-      activeControl.lastYieldAt = now;
-      await waitForNextTick();
-    }
-
-    solveDeterministically(newField);
-
-    const solvedNow = Date.now();
-    if (
-      callbacks.onFieldUpdate &&
-      (depth === 0 || solvedNow - activeControl.lastFieldUpdateAt >= REANALYSIS_FIELD_UPDATE_INTERVAL_MS)
-    ) {
-      callbacks.onFieldUpdate(newField.clone());
-      activeControl.lastFieldUpdateAt = solvedNow;
-    }
-
-    if (newField.isSolved()) {
-      return newField;
-    }
-
-    const candidate = findHypothesisCandidate(newField, previousCoord);
-    if (!candidate) {
+  const runReanalysis = async (newField: Field): Promise<Field> => {
+    solveByContradiction(newField);
+    if (!newField.isSolved()) {
       throw new Error("再解析できませんでした");
     }
-
-    if (callbacks.onProgress && (depth === 0 || now - activeControl.lastProgressAt >= 500)) {
-      callbacks.onProgress(
-        `解析中... 深さ ${depth}: (${candidate.x + 1},${candidate.y + 1}) を試行 (${candidate.choices.length}通り)`
-      );
-      activeControl.lastProgressAt = now;
-    }
-
-    for (let choiceIdx = 0; choiceIdx < candidate.choices.length; choiceIdx++) {
-      const choice = candidate.choices[choiceIdx];
-      const trialField = newField.clone();
-      try {
-        if (!trialField.applyLineAssignments(choice)) {
-          continue;
-        }
-
-        const snapshotNow = Date.now();
-        if (
-          callbacks.onFieldUpdate &&
-          snapshotNow - activeControl.lastFieldUpdateAt >= REANALYSIS_FIELD_UPDATE_INTERVAL_MS
-        ) {
-          callbacks.onFieldUpdate(trialField.clone());
-          activeControl.lastFieldUpdateAt = snapshotNow;
-        }
-
-        const choiceNow = Date.now();
-        if (callbacks.onProgress && choiceNow - activeControl.lastProgressAt >= 500) {
-          callbacks.onProgress(
-            `解析中... 深さ ${depth}: (${candidate.x + 1},${candidate.y + 1}) の選択肢 ${choiceIdx + 1}/${candidate.choices.length}`
-          );
-          activeControl.lastProgressAt = choiceNow;
-        }
-        const solvedField = await runReanalysis(
-          trialField,
-          callbacks,
-          depth + 1,
-          { x: candidate.x, y: candidate.y },
-          activeControl
-        );
-        if (solvedField.isSolved()) {
-          return solvedField;
-        }
-      } catch (error) {
-        if (error instanceof ReanalysisLimitError) {
-          throw error;
-        }
-        continue;
-      }
-    }
-
-    throw new Error("再解析できませんでした");
+    return newField;
   };
 
   /**
@@ -1915,17 +1598,10 @@ export default function MashuPage() {
     setNotice(null);
     if (isReanalysisMode) {
       setIsAnalyzing(true);
-      setReanalysisProgress("解析中... 再解析を開始します");
+      setReanalysisProgress("解析中... 背理法で再解析します");
       await waitForNextTick();
       try {
-        const newField = await runReanalysis(field.clone(), {
-          onProgress: (message) => {
-            setReanalysisProgress(message);
-          },
-          onFieldUpdate: (snapshot) => {
-            setField(snapshot);
-          },
-        });
+        const newField = await runReanalysis(field.clone());
         setField(newField);
         const isSolved = newField.isSolved();
         setSolved(isSolved);
