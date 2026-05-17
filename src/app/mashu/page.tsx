@@ -1183,19 +1183,23 @@ export default function MashuPage() {
       for (let x = 0; x < width; x++) {
         const mark = newField.getCellMark(x, y);
         if (mark === "white") {
-          // 白が3連続以上になる並びの中央は、並び方向に直進できない
-          if (newField.enforceWhiteChainDirection(x, y)) changed = true;
-
           const lines = newField.getSurroundingLines(x, y);
           const lineCount = lines.filter(v => v === "line").length;
           const undecidedCount = lines.filter(v => v === "undecided").length;
+          const isResolved = lineCount === 2 && undecidedCount === 0;
 
           if (lineCount === 0 && undecidedCount === 0) {
             throw new Error(`破綻しました: ${formatPosition(x, y)} / 理由: 白マスなのに線が通らないことが確定しています`);
           }
 
-          // 白丸は直線で通るため、対向する線を確定させる
-          if (newField.analyzeStraight(x, y, true)) changed = true;
+          // 確定済みセルは自己確定処理だけ省略し、近傍への伝播は継続する
+          if (!isResolved) {
+            // 白が3連続以上になる並びの中央は、並び方向に直進できない
+            if (newField.enforceWhiteChainDirection(x, y)) changed = true;
+
+            // 白丸は直線で通るため、対向する線を確定させる
+            if (newField.analyzeStraight(x, y, true)) changed = true;
+          }
 
           // 確定した線の先のマスの状態を判定
           const targets = newField.getConfirmedLineTargets(x, y);
@@ -1235,19 +1239,23 @@ export default function MashuPage() {
           const lines = newField.getSurroundingLines(x, y);
           const lineCount = lines.filter(v => v === "line").length;
           const undecidedCount = lines.filter(v => v === "undecided").length;
+          const isResolved = lineCount === 2 && undecidedCount === 0;
 
           if (lineCount === 0 && undecidedCount === 0) {
             throw new Error(`破綻しました: ${formatPosition(x, y)} / 理由: 黒マスなのに線が通らないことが確定しています`);
           }
 
-          // 黒丸から2マス延ばせない方向（外周に近い）を no-line にする
-          if (newField.checkBlackCanExtend(x, y)) changed = true;
+          // 確定済みセルは自己確定処理だけ省略し、近傍への伝播は継続する
+          if (!isResolved) {
+            // 黒丸から2マス延ばせない方向（外周に近い）を no-line にする
+            if (newField.checkBlackCanExtend(x, y)) changed = true;
 
-          // 隣が黒丸の場合、その方向に線をつけない（×印）
-          if (newField.checkAdjacentBlackCells(x, y)) changed = true;
+            // 隣が黒丸の場合、その方向に線をつけない（×印）
+            if (newField.checkAdjacentBlackCells(x, y)) changed = true;
 
-          // 黒丸は曲がるため、対向する線を確定させない
-          if (newField.analyzeTurn(x, y, true)) changed = true;
+            // 黒丸は曲がるため、対向する線を確定させない
+            if (newField.analyzeTurn(x, y, true)) changed = true;
+          }
 
           // 黒丸から伸びる直線は、次のマスでも直線が続く
           if (newField.extendStraightFromBlack(x, y)) changed = true;
@@ -1275,6 +1283,10 @@ export default function MashuPage() {
 
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
+        const lines = newField.getSurroundingLines(x, y);
+        const undecidedCount = lines.filter(v => v === "undecided").length;
+        if (undecidedCount === 0) continue;
+
         // 線が2本確定しているマスの残り辺にxをつける
         if (newField.blockPassedEdges(x, y)) changed = true;
       }
@@ -1288,6 +1300,10 @@ export default function MashuPage() {
 
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
+        const lines = newField.getSurroundingLines(x, y);
+        const undecidedCount = lines.filter(v => v === "undecided").length;
+        if (undecidedCount === 0) continue;
+
         if (newField.applyTraitConstraints(x, y)) changed = true;
       }
     }
@@ -1306,6 +1322,18 @@ export default function MashuPage() {
       for (let x = 0; x < width; x++) {
         const mark = newField.getCellMark(x, y);
         if (mark === null) {
+          const lines = newField.getSurroundingLines(x, y);
+          const lineCount = lines.filter(v => v === "line").length;
+          const undecidedCount = lines.filter(v => v === "undecided").length;
+
+          if (lineCount === 3) {
+            throw new Error(`破綻しました: ${formatPosition(x, y)} / 理由: 周囲の線が3本確定しています`);
+          }
+
+          if (undecidedCount === 0) {
+            continue;
+          }
+
           // 汎用ルール：確定線の数から未確定線を推論する
           if (newField.analyzeGeneric(x, y, false)) {
             changedByGeneric = true;
@@ -1326,6 +1354,10 @@ export default function MashuPage() {
 
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
+        const lines = newField.getSurroundingLines(x, y);
+        const undecidedCount = lines.filter(v => v === "undecided").length;
+        if (undecidedCount === 0) continue;
+
         if (newField.checkPrematureLoop(x, y)) changed = true;
       }
     }
@@ -1333,35 +1365,161 @@ export default function MashuPage() {
     return changed;
   };
 
-  const solveDeterministically = (newField: Field) => {
+  /**
+   * 決定論的解析の内側ループ（矛盾なしで繰り返し）
+   */
+  const runInnerAnalysis = (f: Field) => {
     let changed = true;
     while (changed) {
-      checkDeadEndCells(newField);
+      checkDeadEndCells(f);
       changed = false;
 
-      // 1. 白丸マスの解析
-      if (analyzeWhiteCells(newField)) changed = true;
-
-      // 2. 黒丸マスの解析
-      if (analyzeBlackCells(newField)) changed = true;
-
-      // 2.5. 属性から線の制約を進める
-      if (analyzeTraitCells(newField)) changed = true;
-
-      // 3. 通過済みマスの残り辺にxをつける
-      if (analyzePassedCells(newField)) changed = true;
-
-      // 4. 局所ループになる辺にxをつける
-      if (analyzePrematureLoops(newField)) changed = true;
-
-      // 5. 空マスの解析
-      const changedByGeneric = analyzeEmptyCells(newField);
+      if (analyzeWhiteCells(f)) changed = true;
+      if (analyzeBlackCells(f)) changed = true;
+      if (analyzeTraitCells(f)) changed = true;
+      if (analyzePassedCells(f)) changed = true;
+      if (analyzePrematureLoops(f)) changed = true;
+      const changedByGeneric = analyzeEmptyCells(f);
       if (changedByGeneric) changed = true;
+      if (!changedByGeneric && !changed) break;
+    }
+  };
 
-      // 空マスでの変更のみの場合は終了（無限ループ防止）
-      if (!changedByGeneric && !changed) {
-        break;
+  /**
+   * 仮定のアサインを適用して解析し、矛盾が発生するかどうかを確認する
+   * 矛盾する場合は true、問題なければ false を返す
+   */
+  const tryContradiction = (trialField: Field, assignments: HypothesisAssignment[]): boolean => {
+    const preConflict = assignments.some(a => {
+      const lines = trialField.getSurroundingLines(a.x, a.y);
+      const current = lines[a.direction];
+      return current !== "undecided" && current !== a.state;
+    });
+    if (preConflict) return true;
+    try {
+      if (assignments.length > 0) trialField.applyLineAssignments(assignments);
+      runInnerAnalysis(trialField);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+
+  /**
+   * 背理法による解析
+   * 黒・白・終端マスについて仮定を置いて解析し、
+   * 破綻するケースから no-line を確定させる
+   */
+  const analyzeByContradiction = (newField: Field): boolean => {
+    let changed = false;
+    const opposite = ([2, 3, 0, 1] as const);
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const mark = newField.getCellMark(x, y);
+        // lineCount は "line" 本数のみ参照し、スキャン中は増えないため一度だけ取得
+        const lineCount = newField.getSurroundingLines(x, y).filter(v => v === "line").length;
+
+        // 黒マス：L字の各方向を仮定して解析
+        if (mark === "black" && lineCount < 2) {
+          const turns: Array<[0 | 1 | 2 | 3, 0 | 1 | 2 | 3]> = [
+            [0, 1], [1, 2], [2, 3], [3, 0],
+          ];
+
+          for (const dir of [0, 1, 2, 3] as const) {
+            // 方向ごとに最新の線状態を取得（同セル内の前の処理で変化している場合がある）
+            const freshLines = newField.getSurroundingLines(x, y);
+            if (freshLines[dir] !== "undecided") continue;
+
+            // このdirをlineとして使う有効なL字パターンを収集
+            const turnsWithDir = turns.filter(
+              ([a, b]) => (a === dir || b === dir) && freshLines[a] !== "no-line" && freshLines[b] !== "no-line"
+            );
+
+            if (turnsWithDir.length === 0) {
+              if (newField.applyLineAssignments([{ x, y, direction: dir, state: "no-line" }])) changed = true;
+              continue;
+            }
+
+            // このdirを含む全パターンが破綻するなら no-line
+            const allFail = turnsWithDir.every(([a, b]) => {
+              const trial = newField.clone();
+              const assignments: HypothesisAssignment[] = [];
+              if (freshLines[a] !== "line") assignments.push({ x, y, direction: a, state: "line" });
+              if (freshLines[b] !== "line") assignments.push({ x, y, direction: b, state: "line" });
+              if (freshLines[opposite[a]] !== "no-line") assignments.push({ x, y, direction: opposite[a], state: "no-line" });
+              if (freshLines[opposite[b]] !== "no-line") assignments.push({ x, y, direction: opposite[b], state: "no-line" });
+              return tryContradiction(trial, assignments);
+            });
+
+            if (allFail) {
+              if (newField.applyLineAssignments([{ x, y, direction: dir, state: "no-line" }])) changed = true;
+            }
+          }
+        }
+
+        // 白マス：縦・横の直線を仮定して解析
+        else if (mark === "white" && lineCount < 2) {
+          // [lineA, lineB] が直線方向、[perpA, perpB] が垂直方向（no-line にする）
+          const straightPairs: Array<{
+            lineA: 0 | 1 | 2 | 3; lineB: 0 | 1 | 2 | 3;
+            perpA: 0 | 1 | 2 | 3; perpB: 0 | 1 | 2 | 3;
+          }> = [
+            { lineA: 0, lineB: 2, perpA: 1, perpB: 3 }, // 縦 (上・下) → 横がno-line
+            { lineA: 1, lineB: 3, perpA: 0, perpB: 2 }, // 横 (右・左) → 縦がno-line
+          ];
+
+          for (const { lineA, lineB, perpA, perpB } of straightPairs) {
+            // 最新状態を取得
+            const freshLines = newField.getSurroundingLines(x, y);
+            if (freshLines[lineA] === "no-line" || freshLines[lineB] === "no-line") continue;
+            if (freshLines[lineA] === "line" && freshLines[lineB] === "line") continue;
+
+            const trial = newField.clone();
+            const assignments: HypothesisAssignment[] = [];
+            if (freshLines[lineA] !== "line") assignments.push({ x, y, direction: lineA, state: "line" });
+            if (freshLines[lineB] !== "line") assignments.push({ x, y, direction: lineB, state: "line" });
+            if (freshLines[perpA] !== "no-line") assignments.push({ x, y, direction: perpA, state: "no-line" });
+            if (freshLines[perpB] !== "no-line") assignments.push({ x, y, direction: perpB, state: "no-line" });
+
+            if (tryContradiction(trial, assignments)) {
+              // 破綻した直線方向をno-lineにする
+              for (const d of [lineA, lineB] as const) {
+                const cur = newField.getSurroundingLines(x, y)[d];
+                if (cur === "undecided") {
+                  if (newField.applyLineAssignments([{ x, y, direction: d, state: "no-line" }])) changed = true;
+                }
+              }
+            }
+          }
+        }
+
+        // 終端マス（線が1本確定）：未確定方向への延伸を仮定して解析
+        else if (lineCount === 1) {
+          for (const dir of [0, 1, 2, 3] as const) {
+            const freshLines = newField.getSurroundingLines(x, y);
+            if (freshLines[dir] !== "undecided") continue;
+            const trial = newField.clone();
+            if (tryContradiction(trial, [{ x, y, direction: dir, state: "line" }])) {
+              if (newField.applyLineAssignments([{ x, y, direction: dir, state: "no-line" }])) changed = true;
+            }
+          }
+        }
       }
+    }
+
+    return changed;
+  };
+
+  const solveDeterministically = (newField: Field) => {
+    let outerChanged = true;
+    while (outerChanged) {
+      // 1～5: 決定論的な内側ループ
+      runInnerAnalysis(newField);
+      if (newField.isSolved()) break;
+
+      // 解析の最後：背理法フェーズ（黒・白・終端マスへの仮定→矛盾検証）
+      outerChanged = analyzeByContradiction(newField);
     }
   };
 

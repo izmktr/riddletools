@@ -91,9 +91,14 @@ describe('MashuPage', () => {
 ・・・◯・・・・◯・・・・・●・・・・・・
 ・◯・・●・◯・・◯・・●・・・・・◯・・`);
 
-    expect(await screen.findByRole('button', { name: '再解析' })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '再解析' }));
-    expect(await screen.findByText('完成しました！', {}, { timeout: 20000 })).toBeInTheDocument();
+    // 背理法フェーズにより初回解析で完成する場合と、再解析が必要な場合の両方に対応
+    const isSolvedDirectly = screen.queryByText('完成しました！') !== null;
+    if (isSolvedDirectly) {
+      expect(screen.getByText('完成しました！')).toBeInTheDocument();
+    } else {
+      const reanalysisButton = await screen.findByRole('button', { name: '再解析' }, { timeout: 5000 });
+      fireEvent.click(reanalysisButton);
+      expect(await screen.findByText('完成しました！', {}, { timeout: 20000 })).toBeInTheDocument();
+    }
   }, 30000);
 });
