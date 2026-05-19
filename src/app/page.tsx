@@ -23,6 +23,7 @@ export default function Home() {
     ["推理パズルソルバー", "/deduction"],
     ["中国剰余定理", "/chinese-remainder"],
     ["回文ソルバー", "/palindrome"],
+    ["迷路ソルバー", "/maze"],
     ["数独ソルバー", "/sudoku"],
     ["ましゅソルバー", "/mashu"],
     ["ぬりかべソルバー(WIP)", "/nurikabe"],
