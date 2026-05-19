@@ -129,6 +129,7 @@ const katakanaToHiragana: { [key: string]: string } = {
 export default function BraillePage() {
   const [input, setInput] = useState('');
   const [results, setResults] = useState<{ type: string; content: string }[]>([]);
+  const [showManual, setShowManual] = useState(false);
 
   // 6点を2桁の数字に変換（複数セルに対応）
   const brailleToTwoDigits = (brailleCode: string): string => {
@@ -393,18 +394,33 @@ export default function BraillePage() {
           ← トップに戻る
         </Link>
       </div>
-      <h1 className="text-3xl font-bold mb-6">点字変換ツール</h1>
+      <h1 className="text-2xl font-bold mb-4">点字変換ツール</h1>
+
+      <div className="flex items-center mb-4 gap-2">
+        <button
+          className={`px-4 py-2 rounded text-sm transition-colors ${
+            showManual
+              ? "bg-gray-200 text-gray-800 hover:bg-gray-300"
+              : "bg-green-100 text-green-700 hover:bg-green-200"
+          }`}
+          onClick={() => setShowManual((v) => !v)}
+        >
+          {showManual ? "閉じる" : "使い方"}
+        </button>
+      </div>
       
       <div className="mb-6">
-        <div className="bg-blue-50 border border-blue-200 rounded p-4 mb-4">
-          <h2 className="font-bold text-blue-800 mb-2">使い方:</h2>
-          <ul className="text-blue-700 space-y-1">
-            <li><strong>文字→点字:</strong> ひらがな、カタカナ、英文字を入力</li>
-            <li className="ml-4">例: &quot;あいう&quot; → 点字と2桁数字で表示</li>
-            <li><strong>数字→文字:</strong> 2桁の数字をスペースで区切って入力</li>
-            <li className="ml-4">例: &quot;10 51 61&quot; → 対応する文字を表示</li>
-          </ul>
-        </div>
+        {showManual && (
+          <div className="bg-blue-50 border border-blue-200 rounded p-4 mb-4 text-sm leading-relaxed">
+            <h2 className="font-bold mb-2">使い方</h2>
+            <ul className="space-y-1">
+              <li><strong>文字→点字:</strong> ひらがな、カタカナ、英文字を入力</li>
+              <li className="ml-4">例: &quot;あいう&quot; → 点字と2桁数字で表示</li>
+              <li><strong>数字→文字:</strong> 2桁の数字をスペースで区切って入力</li>
+              <li className="ml-4">例: &quot;10 51 61&quot; → 対応する文字を表示</li>
+            </ul>
+          </div>
+        )}
 
         <div className="bg-yellow-50 border border-yellow-200 rounded p-4 mb-4">
           <h3 className="font-bold text-yellow-800 mb-2">点字の数字表現について:</h3>
@@ -435,15 +451,15 @@ export default function BraillePage() {
           <div className="flex gap-2">
             <button
               onClick={handleConvert}
-              className="px-6 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               変換
             </button>
             <button
               onClick={handleClear}
-              className="px-6 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500"
+              className="px-6 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-300"
             >
-              クリア
+              リセット
             </button>
           </div>
         </div>

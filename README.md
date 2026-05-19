@@ -58,6 +58,7 @@ npm run build
 
 ## 参考リンク
 
+- [ページの基本構成](docs/page-structure.md)
 - [Next.js Documentation](https://nextjs.org/docs)
 - [GitHub Pages Documentation](https://docs.github.com/pages)
 - [Tailwind CSS Documentation](https://tailwindcss.com/docs)

@@ -196,63 +196,60 @@ export default function NumberConversionPage() {
 
   return (
     <main className="max-w-2xl mx-auto p-6">
-      <div className="flex items-center mb-4 gap-2">
-        <button
-          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
-          onClick={() => setShowManual(true)}
-        >
-          使い方
-        </button>
-        <Link href="/" className="inline-block px-4 py-2 bg-gray-100 rounded hover:bg-gray-200">
-          トップに戻る
+      <div className="mb-4">
+        <Link href="/" className="text-blue-500 hover:text-blue-700 text-sm">
+          ← トップに戻る
         </Link>
       </div>
 
+      <h1 className="text-2xl font-bold mb-4">数字文字変換ツール</h1>
+
+      <div className="flex items-center mb-4 gap-2">
+        <button
+          className={`px-4 py-2 rounded text-sm transition-colors ${
+            showManual
+              ? "bg-gray-200 text-gray-800 hover:bg-gray-300"
+              : "bg-green-100 text-green-700 hover:bg-green-200"
+          }`}
+          onClick={() => setShowManual((v) => !v)}
+        >
+          {showManual ? '閉じる' : '使い方'}
+        </button>
+        <button
+          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+          onClick={handleSample}
+        >
+          英字サンプル
+        </button>
+        <button
+          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+          onClick={handleSampleAiueo}
+        >
+          あいうサンプル
+        </button>
+        <button
+          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+          onClick={handleSampleIroha}
+        >
+          いろはサンプル
+        </button>
+      </div>
+
       {showManual && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative max-h-96 overflow-y-auto">
-            <button
-              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
-              onClick={() => setShowManual(false)}
-            >
-              閉じる
-            </button>
-            <h3 className="text-xl font-bold mb-2">数字文字変換の使い方</h3>
-            <ul className="list-disc pl-5 space-y-2 text-sm mb-4">
-              <li>数字を文字に変換します。複数の数字は空白で区切ってください。</li>
-              <li><strong>英字</strong>: 1→A, 2→B, ..., 26→Z</li>
-              <li><strong>あいう</strong>: 1→あ, 2→い, ..., 46→ん</li>
-              <li><strong>いろは</strong>: 1→い, 2→ろ, ..., 47→ん</li>
-              <li><strong>ループする</strong>: ONの場合、最大値を超えても循環します</li>
-              <li><strong>計算式</strong>: 全モードで「A+7」「あ+4」「い+3」のような計算が可能</li>
-              <li><strong>濁音</strong>: あいうモードでは47-71が濁音・半濁音に対応</li>
-              <li><strong>濁音軸計算</strong>: 濁音文字（が、ぎ等）は1-25の独立した軸で計算される（「が」=1）</li>
-            </ul>
-            <div className="flex gap-2">
-              <button
-                className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-                onClick={handleSample}
-              >
-                英字サンプル
-              </button>
-              <button
-                className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-                onClick={handleSampleAiueo}
-              >
-                あいうサンプル
-              </button>
-              <button
-                className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-                onClick={handleSampleIroha}
-              >
-                いろはサンプル
-              </button>
-            </div>
-          </div>
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded text-sm leading-relaxed">
+          <h3 className="font-bold mb-2">使い方</h3>
+          <ul className="list-disc pl-5 space-y-2">
+            <li>数字を文字に変換します。複数の数字は空白で区切ってください。</li>
+            <li><strong>英字</strong>: 1→A, 2→B, ..., 26→Z</li>
+            <li><strong>あいう</strong>: 1→あ, 2→い, ..., 46→ん</li>
+            <li><strong>いろは</strong>: 1→い, 2→ろ, ..., 47→ん</li>
+            <li><strong>ループする</strong>: ONの場合、最大値を超えても循環します</li>
+            <li><strong>計算式</strong>: 全モードで「A+7」「あ+4」「い+3」のような計算が可能</li>
+            <li><strong>濁音</strong>: あいうモードでは47-71が濁音・半濁音に対応</li>
+            <li><strong>濁音軸計算</strong>: 濁音文字（が、ぎ等）は1-25の独立した軸で計算される（「が」=1）</li>
+          </ul>
         </div>
       )}
-
-      <h2 className="text-2xl font-bold mb-6">数字文字変換</h2>
 
       {/* 変換タイプ選択 */}
       <div className="mb-4">
@@ -319,25 +316,7 @@ export default function NumberConversionPage() {
       {/* ボタン */}
       <div className="mb-6 flex gap-2 flex-wrap">
         <button
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          onClick={handleSample}
-        >
-          英字サンプル
-        </button>
-        <button
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          onClick={handleSampleAiueo}
-        >
-          あいうサンプル
-        </button>
-        <button
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          onClick={handleSampleIroha}
-        >
-          いろはサンプル
-        </button>
-        <button
-          className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+          className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200"
           onClick={handleReset}
         >
           リセット

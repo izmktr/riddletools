@@ -207,7 +207,7 @@ export default function DeductionPage() {
               <li>{`タグの値を省略すると {true,false} として補完されます。`}</li>
               <li>等号条件でタグ名のみを書くと、そのタグの値1を指す糖衣構文です。</li>
               <li>解析エラーがある場合は「行番号:行内容」と「エラー:詳細」を表示します。</li>
-              <li>「サンプル」で入力例を復元、「クリア」で入力と結果を消去できます。</li>
+              <li>「サンプル」で入力例を復元、「リセット」で入力と結果を消去できます。</li>
             </ul>
           </div>
         </div>
@@ -422,7 +422,7 @@ C=正直:B=犯人`}
           className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
           onClick={handleClear}
         >
-          クリア
+          リセット
         </button>
 
       </div>

@@ -136,35 +136,32 @@ export default function PickPage() {
       <h1 className="text-2xl font-bold mb-4">文字拾いツール</h1>
       <div className="flex items-center mb-4 gap-2">
         <button
+          className={`px-4 py-2 rounded text-sm transition-colors ${
+            showManual
+              ? "bg-gray-200 text-gray-800 hover:bg-gray-300"
+              : "bg-green-100 text-green-700 hover:bg-green-200"
+          }`}
+          onClick={() => setShowManual((v) => !v)}
+        >{showManual ? "閉じる" : "使い方"}</button>
+        <button
           className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
-          onClick={() => setShowManual(true)}
-        >使い方</button>
+          onClick={handleSample}
+        >サンプル</button>
       </div>
       {showManual && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative">
-            <button
-              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
-              onClick={() => setShowManual(false)}
-            >閉じる</button>
-            <h3 className="text-xl font-bold mb-2">文字拾いツールの使い方</h3>
-            <ul className="list-disc pl-5 space-y-2 text-sm mb-4">
-              <li>左・右のテキストエリアに文字列や数字を入力してください（複数行可）。</li>
-              <li>空白は無視されます。</li>
-              <li>右側の数字・文字に応じて、左側の文字列から対応する文字を拾い出します。</li>
-              <li>「カスタム出力」欄に文字や数字を入力すると、対応表が下部に表示されます。</li>
-              <li>「2桁を使う」にチェックすると、右側・カスタム出力の数字が2桁単位で認識されます。</li>
-              <li>「2桁を使う」場合で1桁をいれる場合は空白を挟んでください。</li>
-              <li>リセットボタンで全入力を消去できます。</li>
-            </ul>
-            <button
-              className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 mr-2"
-              onClick={handleSample}
-            >サンプル</button>
-          </div>
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded text-sm leading-relaxed">
+          <h3 className="font-bold mb-2">使い方</h3>
+          <ul className="list-disc pl-5 space-y-2">
+            <li>左・右のテキストエリアに文字列や数字を入力してください（複数行可）。</li>
+            <li>空白は無視されます。</li>
+            <li>右側の数字・文字に応じて、左側の文字列から対応する文字を拾い出します。</li>
+            <li>「カスタム出力」欄に文字や数字を入力すると、対応表が下部に表示されます。</li>
+            <li>「2桁を使う」にチェックすると、右側・カスタム出力の数字が2桁単位で認識されます。</li>
+            <li>「2桁を使う」場合で1桁をいれる場合は空白を挟んでください。</li>
+            <li>リセットボタンで全入力を消去できます。</li>
+          </ul>
         </div>
       )}
-      <h2 className="text-2xl font-bold mb-4">文字拾いツール</h2>
       <div className="mb-4 flex gap-4">
         <textarea
           className="w-1/2 h-64 p-2 border rounded"

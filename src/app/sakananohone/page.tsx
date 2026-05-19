@@ -210,44 +210,51 @@ export default function SakananohonePage() {
 
   return (
     <main className="max-w-6xl mx-auto p-6">
+      <div className="mb-4">
+        <Link href="/" className="text-blue-500 hover:text-blue-700 text-sm">
+          ← トップに戻る
+        </Link>
+      </div>
+
+      <h1 className="text-2xl font-bold mb-4">魚の骨ツール</h1>
+
       <div className="flex items-center mb-4 gap-2">
         <button
-          className="px-4 py-2 bg-orange-100 text-orange-700 rounded hover:bg-orange-200"
-          onClick={() => setShowManual(true)}
-        >使い方</button>
-        <Link href="/" className="inline-block px-4 py-2 bg-gray-100 rounded hover:bg-gray-200">トップに戻る</Link>
+          className={`px-4 py-2 rounded text-sm transition-colors ${
+            showManual
+              ? "bg-gray-200 text-gray-800 hover:bg-gray-300"
+              : "bg-green-100 text-green-700 hover:bg-green-200"
+          }`}
+          onClick={() => setShowManual((v) => !v)}
+        >{showManual ? "閉じる" : "使い方"}</button>
+        <button
+          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+          onClick={handleSample}
+        >サンプル</button>
       </div>
 
       {showManual && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded shadow-lg p-6 max-w-2xl w-full relative max-h-96 overflow-y-auto">
-            <button
-              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
-              onClick={() => setShowManual(false)}
-            >閉じる</button>
-            <h3 className="text-xl font-bold mb-2">魚の骨ツールの使い方</h3>
-            <ul className="list-disc pl-5 space-y-2 text-sm mb-4">
-              <li>左側に単語リスト、右側に読む位置を入力します。</li>
-              <li>単語リストと読む位置は改行区切りで入力し、同じ行数で対応させます。</li>
-              <li>読む位置は数値で入力してください（例：1、2、3）。</li>
-              <li>「縦書き」チェックボックスをONにすると、単語が縦方向に配置されます。</li>
-              <li>行番号の種類を「数字」「ABC」「あいう」「いろは」から選択できます。</li>
-              <li>文字が足りない場合は空欄になります。</li>
-              <li>入力内容を変更すると自動的に魚の骨形の表が生成されます。</li>
-              <li>読む位置に対応する文字が黄色でハイライトされます。</li>
-              <li>「サンプル」ボタンで例のデータを入力できます。</li>
-            </ul>
-            <h4 className="font-bold mb-2">例:</h4>
-            <div className="text-sm text-gray-600">
-              <p>単語リスト: さんぷる、なかま、なのはな...</p>
-              <p>読む位置: 1、2、4...</p>
-              <p>結果: 魚の骨のような形で単語が配置され、指定位置の文字がハイライト</p>
-            </div>
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded text-sm leading-relaxed">
+          <h3 className="font-bold mb-2">使い方</h3>
+          <ul className="list-disc pl-5 space-y-2 mb-4">
+            <li>左側に単語リスト、右側に読む位置を入力します。</li>
+            <li>単語リストと読む位置は改行区切りで入力し、同じ行数で対応させます。</li>
+            <li>読む位置は数値で入力してください（例：1、2、3）。</li>
+            <li>「縦書き」チェックボックスをONにすると、単語が縦方向に配置されます。</li>
+            <li>行番号の種類を「数字」「ABC」「あいう」「いろは」から選択できます。</li>
+            <li>文字が足りない場合は空欄になります。</li>
+            <li>入力内容を変更すると自動的に魚の骨形の表が生成されます。</li>
+            <li>読む位置に対応する文字が黄色でハイライトされます。</li>
+            <li>「サンプル」ボタンで例のデータを入力できます。</li>
+          </ul>
+          <h4 className="font-bold mb-2">例:</h4>
+          <div className="text-gray-600">
+            <p>単語リスト: さんぷる、なかま、なのはな...</p>
+            <p>読む位置: 1、2、4...</p>
+            <p>結果: 魚の骨のような形で単語が配置され、指定位置の文字がハイライト</p>
           </div>
         </div>
       )}
-
-      <h2 className="text-2xl font-bold mb-4">魚の骨ツール</h2>
 
       {/* 入力エリア */}
       <div className="grid md:grid-cols-2 gap-6 mb-6">
@@ -304,10 +311,6 @@ export default function SakananohonePage() {
             className="px-6 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
             onClick={handleReset}
           >リセット</button>
-          <button
-            className="px-6 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
-            onClick={handleSample}
-          >サンプル</button>
         </div>
       </div>
 

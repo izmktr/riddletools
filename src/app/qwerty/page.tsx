@@ -70,55 +70,52 @@ export default function QwertyPage() {
 
   return (
     <main className="max-w-2xl mx-auto p-6">
-      <div className="flex items-center mb-4 gap-2">
-        <button
-          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
-          onClick={() => setShowManual(true)}
-        >
-          使い方
-        </button>
-        <Link href="/" className="inline-block px-4 py-2 bg-gray-100 rounded hover:bg-gray-200">
-          トップに戻る
+      <div className="mb-4">
+        <Link href="/" className="text-blue-500 hover:text-blue-700 text-sm">
+          ← トップに戻る
         </Link>
       </div>
 
+      <h1 className="text-2xl font-bold mb-4">QWERTY⇔かな変換ツール</h1>
+
+      <div className="flex items-center mb-4 gap-2">
+        <button
+          className={`px-4 py-2 rounded text-sm transition-colors ${
+            showManual
+              ? "bg-gray-200 text-gray-800 hover:bg-gray-300"
+              : "bg-green-100 text-green-700 hover:bg-green-200"
+          }`}
+          onClick={() => setShowManual((v) => !v)}
+        >
+          {showManual ? '閉じる' : '使い方'}
+        </button>
+        <button
+          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+          onClick={handleSample1}
+        >
+          サンプル1（みかか）
+        </button>
+        <button
+          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+          onClick={handleSample2}
+        >
+          サンプル2（345）
+        </button>
+      </div>
+
       {showManual && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative">
-            <button
-              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
-              onClick={() => setShowManual(false)}
-            >
-              閉じる
-            </button>
-            <h3 className="text-xl font-bold mb-2">QWERTY⇔かな変換の使い方</h3>
-            <ul className="list-disc pl-5 space-y-2 text-sm mb-4">
-              <li>QWERTY配列のキーに対応するかな文字に変換します。</li>
-              <li>例：「qwerty」→「たていすかん」</li>
-              <li>逆に、かな文字をQWERTY配列のキーに変換することもできます。</li>
-              <li>例：「みかか」→「NTT」</li>
-              <li>数字キーにも対応しています。</li>
-              <li>例：「345」→「あうえ」</li>
-            </ul>
-            <div className="flex gap-2">
-              <button
-                className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-                onClick={handleSample1}
-              >
-                サンプル1（みかか）
-              </button>
-              <button
-                className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-                onClick={handleSample2}
-              >
-                サンプル2（345）
-              </button>
-            </div>
-          </div>
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded text-sm leading-relaxed">
+          <h3 className="font-bold mb-2">使い方</h3>
+          <ul className="list-disc pl-5 space-y-2">
+            <li>QWERTY配列のキーに対応するかな文字に変換します。</li>
+            <li>例：「qwerty」→「たていすかん」</li>
+            <li>逆に、かな文字をQWERTY配列のキーに変換することもできます。</li>
+            <li>例：「みかか」→「NTT」</li>
+            <li>数字キーにも対応しています。</li>
+            <li>例：「345」→「あうえ」</li>
+          </ul>
         </div>
       )}
-
-      <h2 className="text-2xl font-bold mb-6">QWERTY⇔かな変換</h2>
 
       <div className="mb-6">
         <label className="block text-sm font-semibold mb-2">入力テキスト</label>
@@ -132,19 +129,7 @@ export default function QwertyPage() {
 
       <div className="mb-6 flex gap-2">
         <button
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          onClick={handleSample1}
-        >
-          サンプル1（みかか）
-        </button>
-        <button
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          onClick={handleSample2}
-        >
-          サンプル2（345）
-        </button>
-        <button
-          className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+          className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200"
           onClick={handleReset}
         >
           リセット

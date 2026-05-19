@@ -396,14 +396,18 @@ export default function DateCalcPage() {
       <div className="flex items-center mb-4 gap-2">
         <button
           type="button"
-          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
-          onClick={() => setShowManual(true)}
+          className={`px-4 py-2 rounded text-sm transition-colors ${
+            showManual
+              ? "bg-gray-200 text-gray-800 hover:bg-gray-300"
+              : "bg-green-100 text-green-700 hover:bg-green-200"
+          }`}
+          onClick={() => setShowManual((v) => !v)}
         >
-          使い方
+          {showManual ? '閉じる' : '使い方'}
         </button>
         <button
           type="button"
-          className="px-4 py-2 bg-yellow-100 text-yellow-800 rounded hover:bg-yellow-200"
+          className="px-4 py-2 text-sm bg-yellow-100 text-yellow-800 rounded hover:bg-yellow-200"
           onClick={() => {
             const initialYear = Math.min(Math.max(currentYear, minHolidayYear), maxHolidayYear);
             setHolidayViewYear(initialYear);
@@ -414,24 +418,15 @@ export default function DateCalcPage() {
         </button>
       </div>
       {showManual && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative">
-            <button
-              type="button"
-              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
-              onClick={() => setShowManual(false)}
-            >
-              閉じる
-            </button>
-            <h3 className="text-xl font-bold mb-2">日付計算ツールの使い方</h3>
-            <ul className="list-disc pl-5 space-y-2 text-sm">
-              <li>テキストボックスに日付を入力（YYYY-MM-DD形式）</li>
-              <li>📅 ボタンをクリックしてカレンダーから日付を選択</li>
-              <li>2つの日付を入力すると自動的に日数の差を計算します</li>
-              <li>曜日のチェックで指定した曜日の出現回数を確認できます</li>
-              <li>対応形式: 2024-03-19, 2024/03/19, 20240319, 03-19, 0319</li>
-            </ul>
-          </div>
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded text-sm leading-relaxed">
+          <h3 className="font-bold mb-2">使い方</h3>
+          <ul className="list-disc pl-5 space-y-2">
+            <li>テキストボックスに日付を入力（YYYY-MM-DD形式）</li>
+            <li>📅 ボタンをクリックしてカレンダーから日付を選択</li>
+            <li>2つの日付を入力すると自動的に日数の差を計算します</li>
+            <li>曜日のチェックで指定した曜日の出現回数を確認できます</li>
+            <li>対応形式: 2024-03-19, 2024/03/19, 20240319, 03-19, 0319</li>
+          </ul>
         </div>
       )}
       {showHolidayViewer && (

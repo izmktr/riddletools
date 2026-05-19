@@ -213,40 +213,43 @@ export default function MorsePage() {
 
   return (
     <main className="max-w-4xl mx-auto p-6">
+      <div className="mb-4">
+        <Link href="/" className="text-blue-500 hover:text-blue-700 text-sm">
+          ← トップに戻る
+        </Link>
+      </div>
+
+      <h1 className="text-2xl font-bold mb-4">モールス信号変換ツール</h1>
+
       <div className="flex items-center mb-4 gap-2">
         <button
-          className="px-4 py-2 bg-violet-100 text-violet-700 rounded hover:bg-violet-200"
-          onClick={() => setShowManual(true)}
-        >使い方</button>
-        <Link href="/" className="inline-block px-4 py-2 bg-gray-100 rounded hover:bg-gray-200">トップに戻る</Link>
+          className={`px-4 py-2 rounded text-sm transition-colors ${
+            showManual
+              ? "bg-gray-200 text-gray-800 hover:bg-gray-300"
+              : "bg-green-100 text-green-700 hover:bg-green-200"
+          }`}
+          onClick={() => setShowManual((v) => !v)}
+        >{showManual ? "閉じる" : "使い方"}</button>
       </div>
 
       {showManual && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded shadow-lg p-6 max-w-lg w-full relative max-h-96 overflow-y-auto">
-            <button
-              className="absolute top-2 right-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
-              onClick={() => setShowManual(false)}
-            >閉じる</button>
-            <h3 className="text-xl font-bold mb-2">モールス信号変換ツールの使い方</h3>
-            <ul className="list-disc pl-5 space-y-2 text-sm mb-4">
-              <li>テキストボックスに文字またはモールス信号を入力します。</li>
-              <li>ひらがな、カタカナ、アルファベット、数字はモールス信号に変換されます。</li>
-              <li>モールス信号は自動的に文字に変換されます。</li>
-              <li>短い音と長い音の記号は自由に変更できます（デフォルト: .と-）。</li>
-              <li>モールス信号を入力する際は、文字間をスペースで区切ってください。</li>
-              <li>対応していない文字はそのまま表示されます。</li>
-            </ul>
-            <h4 className="font-bold mb-2">例:</h4>
-            <ul className="text-sm text-gray-600">
-              <li>「こんにちは」→ モールス信号</li>
-              <li>「・・・・ --- -. -. .. -.-. .... .-」→ 文字</li>
-            </ul>
-          </div>
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded text-sm leading-relaxed">
+          <h3 className="font-bold mb-2">使い方</h3>
+          <ul className="list-disc pl-5 space-y-2 mb-4">
+            <li>テキストボックスに文字またはモールス信号を入力します。</li>
+            <li>ひらがな、カタカナ、アルファベット、数字はモールス信号に変換されます。</li>
+            <li>モールス信号は自動的に文字に変換されます。</li>
+            <li>短い音と長い音の記号は自由に変更できます（デフォルト: .と-）。</li>
+            <li>モールス信号を入力する際は、文字間をスペースで区切ってください。</li>
+            <li>対応していない文字はそのまま表示されます。</li>
+          </ul>
+          <h4 className="font-bold mb-2">例:</h4>
+          <ul className="text-gray-600">
+            <li>「こんにちは」→ モールス信号</li>
+            <li>「・・・・ --- -. -. .. -.-. .... .-」→ 文字</li>
+          </ul>
         </div>
       )}
-
-      <h2 className="text-2xl font-bold mb-4">モールス信号変換ツール</h2>
 
       {/* 記号設定 */}
       <div className="mb-4 flex gap-4 items-center">

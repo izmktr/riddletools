@@ -281,15 +281,19 @@ export default function DictionaryPage() {
   return (
     <main className="min-h-screen p-6 max-w-5xl mx-auto">
       <div className="mb-4">
-        <Link href="/" className="text-blue-600 hover:underline text-sm">
-          ← トップへ戻る
+        <Link href="/" className="text-blue-500 hover:text-blue-700 text-sm">
+          ← トップに戻る
         </Link>
       </div>
-      <div className="flex items-center gap-3 mb-6">
-        <h1 className="text-2xl font-bold">検索・辞書</h1>
+      <h1 className="text-2xl font-bold mb-4">検索・辞書</h1>
+      <div className="flex items-center mb-4 gap-2">
         <button
           onClick={() => setShowHelp((v) => !v)}
-          className="text-sm border rounded px-3 py-1 hover:bg-gray-100 transition-colors"
+          className={`px-4 py-2 rounded text-sm transition-colors ${
+            showHelp
+              ? "bg-gray-200 text-gray-800 hover:bg-gray-300"
+              : "bg-green-100 text-green-700 hover:bg-green-200"
+          }`}
         >
           {showHelp ? "閉じる" : "使い方"}
         </button>
@@ -378,13 +382,13 @@ export default function DictionaryPage() {
           />
           <button
             onClick={handleSearch}
-            className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-1.5 rounded transition-colors"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm transition-colors"
           >
             検索
           </button>
           <button
             onClick={() => { setSearchText(""); setMatchedCells(new Set()); setHasSearched(false); setResultExceeded(false); }}
-            className="bg-gray-200 hover:bg-gray-300 px-4 py-1.5 rounded transition-colors"
+            className="bg-red-100 hover:bg-red-200 text-red-700 px-4 py-2 rounded text-sm transition-colors"
           >
             リセット
           </button>
@@ -416,7 +420,7 @@ export default function DictionaryPage() {
         />
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="bg-gray-200 hover:bg-gray-300 px-4 py-1.5 rounded transition-colors text-sm font-semibold"
+          className="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded text-sm transition-colors"
         >
           CSVを開く
         </button>
@@ -434,14 +438,14 @@ export default function DictionaryPage() {
         <div className="flex gap-3 mb-3">
           <button
             onClick={handleSelectAll}
-            className="bg-gray-200 hover:bg-gray-300 px-4 py-1.5 rounded transition-colors text-sm font-semibold"
+            className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded text-sm transition-colors"
           >
             {hasAnySelected ? "全解除" : "全選択"}
           </button>
           <button
             onClick={() => setSortState(null)}
             disabled={!sortState}
-            className="bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400 px-4 py-1.5 rounded transition-colors text-sm font-semibold"
+            className="bg-gray-200 hover:bg-gray-300 text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded text-sm transition-colors"
           >
             並び替えを戻す
           </button>

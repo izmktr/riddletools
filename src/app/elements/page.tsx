@@ -128,6 +128,7 @@ const elements = [
 export default function ElementsPage() {
   const [input, setInput] = useState('');
   const [results, setResults] = useState<string[]>([]);
+  const [showManual, setShowManual] = useState(false);
 
   // 数字から元素記号への変換
   const convertNumbersToElements = (input: string): string[] => {
@@ -248,18 +249,33 @@ export default function ElementsPage() {
           ← トップに戻る
         </Link>
       </div>
-      <h1 className="text-3xl font-bold mb-6">元素記号変換ツール</h1>
+      <h1 className="text-2xl font-bold mb-4">元素記号変換ツール</h1>
+
+      <div className="flex items-center mb-4 gap-2">
+        <button
+          className={`px-4 py-2 rounded text-sm transition-colors ${
+            showManual
+              ? "bg-gray-200 text-gray-800 hover:bg-gray-300"
+              : "bg-green-100 text-green-700 hover:bg-green-200"
+          }`}
+          onClick={() => setShowManual((v) => !v)}
+        >
+          {showManual ? "閉じる" : "使い方"}
+        </button>
+      </div>
       
       <div className="mb-6">
-        <div className="bg-blue-50 border border-blue-200 rounded p-4 mb-4">
-          <h2 className="font-bold text-blue-800 mb-2">使い方:</h2>
-          <ul className="text-blue-700 space-y-1">
-            <li><strong>数字入力:</strong> スペースで区切った原子番号を元素記号に変換</li>
-            <li className="ml-4">例: &quot;1 6 8&quot; → &quot;H(水素) C(炭素) O(酸素)&quot;</li>
-            <li><strong>アルファベット入力:</strong> 文字列を元素記号の組み合わせに分割</li>
-            <li className="ml-4">例: &quot;CARBON&quot; → &quot;C(6) Ar(18) B(5) O(8) N(7)&quot; など</li>
-          </ul>
-        </div>
+        {showManual && (
+          <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded text-sm leading-relaxed">
+            <h2 className="font-bold mb-2">使い方</h2>
+            <ul className="space-y-1">
+              <li><strong>数字入力:</strong> スペースで区切った原子番号を元素記号に変換</li>
+              <li className="ml-4">例: &quot;1 6 8&quot; → &quot;H(水素) C(炭素) O(酸素)&quot;</li>
+              <li><strong>アルファベット入力:</strong> 文字列を元素記号の組み合わせに分割</li>
+              <li className="ml-4">例: &quot;CARBON&quot; → &quot;C(6) Ar(18) B(5) O(8) N(7)&quot; など</li>
+            </ul>
+          </div>
+        )}
         
         <div className="space-y-4">
           <div>
@@ -279,15 +295,15 @@ export default function ElementsPage() {
           <div className="flex gap-2">
             <button
               onClick={handleConvert}
-              className="px-6 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               変換
             </button>
             <button
               onClick={handleClear}
-              className="px-6 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500"
+              className="px-6 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-300"
             >
-              クリア
+              リセット
             </button>
           </div>
         </div>
