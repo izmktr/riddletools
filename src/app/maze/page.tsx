@@ -993,7 +993,7 @@ export default function MazePage() {
       case 'blocked':
         return `${baseStyle} ${interactiveStyle} bg-black text-white text-lg z-3`;
       case 'start':
-        return `${baseStyle} ${interactiveStyle} bg-white text-red-600 text-3xl leading-none`;
+        return `${baseStyle} ${interactiveStyle} bg-white text-emerald-700 text-3xl leading-none`;
       case 'goal':
         return `${baseStyle} ${interactiveStyle} bg-white text-blue-600 text-3xl leading-none`;
       default:
