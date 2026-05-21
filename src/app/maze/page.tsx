@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
 
 type CellType = 'empty' | 'blocked' | 'start' | 'goal';
@@ -91,6 +91,7 @@ export default function MazePage() {
   const [rule, setRule] = useState<RuleType>('shortest');
   const [solutionPath, setSolutionPath] = useState<Coordinate[]>([]);
   const [hasMultipleShortestPath, setHasMultipleShortestPath] = useState(false);
+  const [showStepNumbers, setShowStepNumbers] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
   const [showManual, setShowManual] = useState(false);
@@ -796,7 +797,25 @@ export default function MazePage() {
     setHasAnalyzed(false);
     setSolutionPath([]);
     setHasMultipleShortestPath(false);
+    setShowStepNumbers(false);
   }, []);
+
+  const stepNumbersByCell = useMemo(() => {
+    const result = new Map<string, number[]>();
+
+    solutionPath.forEach((coord, index) => {
+      const key = `${coord.x},${coord.y}`;
+      const nextStep = index + 1;
+      const existing = result.get(key);
+      if (existing) {
+        existing.push(nextStep);
+      } else {
+        result.set(key, [nextStep]);
+      }
+    });
+
+    return result;
+  }, [solutionPath]);
 
   const handleExport = useCallback(() => {
     let start: Coordinate | null = null;
@@ -1151,6 +1170,7 @@ export default function MazePage() {
     const shiftRightGridInWallMode = wallModeActive && !isOuterRight && cellEdges.right === 'normal';
     const shiftBottomGridInWallMode = wallModeActive && !isOuterBottom && cellEdges.bottom === 'normal';
     const cellZIndex = cell.type === 'start' || cell.type === 'goal' ? 20 : 3;
+    const stepNumbers = showStepNumbers ? stepNumbersByCell.get(`${colIndex},${rowIndex}`) : undefined;
 
     return (
       <div key={`${rowIndex}-${colIndex}`} className="relative">
@@ -1291,6 +1311,18 @@ export default function MazePage() {
                 }}
               />
             )}
+          </div>
+        )}
+
+        {/* STEP数表示（線より上、同一マス複数訪問は縦並び） */}
+        {stepNumbers && stepNumbers.length > 0 && (
+          <div
+            className="absolute top-0 left-1 px-0.5 py-0.5 text-[10px] leading-3 font-bold text-green-700 pointer-events-none"
+            style={{ zIndex: 18 }}
+          >
+            {stepNumbers.map((step) => (
+              <div key={step}>{step}</div>
+            ))}
           </div>
         )}
         
@@ -1454,12 +1486,24 @@ export default function MazePage() {
       <div className="mb-4">
         <div className="flex items-center gap-2 flex-wrap">
           {hasAnalyzed ? (
-            <button
-              onClick={handleBackToInput}
-              className="px-4 py-2 bg-gray-200 text-gray-800 rounded text-sm hover:bg-gray-300"
-            >
-              入力に戻る
-            </button>
+            <>
+              <button
+                onClick={handleBackToInput}
+                className="px-4 py-2 bg-gray-200 text-gray-800 rounded text-sm hover:bg-gray-300"
+              >
+                入力に戻る
+              </button>
+              <button
+                onClick={() => setShowStepNumbers((prev) => !prev)}
+                className={`px-4 py-2 rounded text-sm ${
+                  showStepNumbers
+                    ? 'bg-green-600 text-white hover:bg-green-700'
+                    : 'bg-green-100 text-green-700 hover:bg-green-200'
+                }`}
+              >
+                数字表示
+              </button>
+            </>
           ) : (
             <>
               <button
@@ -1593,6 +1637,7 @@ export default function MazePage() {
                 setSolutionPath([]);
                 setHasMultipleShortestPath(false);
                 setHasAnalyzed(false);
+                setShowStepNumbers(false);
               }}
               className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
             >
