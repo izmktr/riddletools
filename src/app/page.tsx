@@ -29,6 +29,9 @@ export default function Home() {
     ["ぬりかべソルバー(WIP)", "/nurikabe"],
     ["詰将棋ソルバー", "/shogi-mate"],
   ];
+  const Game = [
+    ["モールス信号ゲーム", "/morse-game"],
+  ];
 
   // 色のグラデーション生成関数
   const generateGradientColors = (startHue: number, endHue: number, count: number, saturation: number = 50, lightness: number = 90) => {
@@ -50,11 +53,14 @@ export default function Home() {
   // ソルバー用の色（緑から青緑のグラデーション）
   const solverColors = generateGradientColors(120, 180, Solver.length);
 
+  // ゲーム用の色（橙から赤のグラデーション）
+  const gameColors = generateGradientColors(15, 35, Game.length, 70, 92);
+
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-8">
       <h1 className="text-4xl font-bold mb-8">Riddle Tools</h1>
       
-      <div className="w-full max-w-4xl grid md:grid-cols-2 gap-8">
+      <div className="w-full max-w-6xl grid gap-8 lg:grid-cols-3">
         {/* ツール */}
         <div>
           <h2 className="text-2xl font-bold mb-4 text-center text-blue-800">ツール</h2>
@@ -99,6 +105,36 @@ export default function Home() {
                     style={{
                       background: color.background,
                       color: color.textColor
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = color.backgroundHover;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = color.background;
+                    }}
+                  >
+                    {name}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+
+        {/* ゲーム */}
+        <div>
+          <h2 className="text-2xl font-bold mb-4 text-center text-orange-800">ゲーム</h2>
+          <ul className="space-y-4">
+            {Game.map(([name, path], index) => {
+              const color = gameColors[index];
+              return (
+                <li key={path}>
+                  <Link
+                    href={path}
+                    className="block font-semibold rounded-lg px-6 py-4 shadow-lg transform hover:scale-105 transition-all duration-200"
+                    style={{
+                      background: color.background,
+                      color: color.textColor,
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.background = color.backgroundHover;
