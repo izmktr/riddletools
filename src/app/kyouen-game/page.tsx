@@ -275,9 +275,11 @@ function computeGreatSuccessCells(
 const CELL_SIZE = 48;
 const DEFAULT_SIZE = 8;
 
-type Mode = "free" | "game";
+type Mode = "free" | "game" | "point";
 type GamePhase = "idle" | "playing" | "answered";
 type GameResult = "success" | "failure" | "bigSuccess";
+type PointingResult = "success" | "failure";
+type Quadruple = [number, number, number, number, number, number, number, number];
 
 const shuffle = <T,>(arr: T[]): T[] => {
   const next = [...arr];
@@ -328,6 +330,168 @@ const createGameBoard = (width: number, height: number): Set<string> => {
   return blacks;
 };
 
+function isCollinear(
+  x1: number, y1: number,
+  x2: number, y2: number,
+  x3: number, y3: number
+): boolean {
+  return (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1) === 0;
+}
+
+function areFourConcyclic(points: [number, number][]): boolean {
+  if (points.length !== 4) return false;
+  const [p1, p2, p3, p4] = points;
+
+  // 指摘共円では「一直線上の4点」も共円をもつ扱いにする
+  if (
+    isCollinear(p1[0], p1[1], p2[0], p2[1], p3[0], p3[1]) &&
+    isCollinear(p1[0], p1[1], p2[0], p2[1], p4[0], p4[1])
+  ) {
+    return true;
+  }
+
+  const idxPatterns: [number, number, number, number][] = [
+    [0, 1, 2, 3],
+    [0, 1, 3, 2],
+    [0, 2, 3, 1],
+    [1, 2, 3, 0],
+  ];
+
+  for (const [a, b, c, d] of idxPatterns) {
+    const [x1, y1] = points[a];
+    const [x2, y2] = points[b];
+    const [x3, y3] = points[c];
+    const [x4, y4] = points[d];
+    if (isCollinear(x1, y1, x2, y2, x3, y3)) continue;
+    if (isOnCircumcircle(x1, y1, x2, y2, x3, y3, x4, y4)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function quadrupleToKey(quad: Quadruple): string {
+  const points: string[] = [
+    `${quad[0]},${quad[1]}`,
+    `${quad[2]},${quad[3]}`,
+    `${quad[4]},${quad[5]}`,
+    `${quad[6]},${quad[7]}`,
+  ].sort();
+  return points.join("|");
+}
+
+function findConcyclicQuadruples(blacks: Set<string>): Quadruple[] {
+  const list: [number, number][] = Array.from(blacks).map((k) => {
+    const [x, y] = k.split(",").map(Number);
+    return [x, y];
+  });
+
+  const result: Quadruple[] = [];
+  const seen = new Set<string>();
+  const n = list.length;
+  if (n < 4) return result;
+
+  for (let i = 0; i < n - 3; i++) {
+    for (let j = i + 1; j < n - 2; j++) {
+      for (let k = j + 1; k < n - 1; k++) {
+        for (let l = k + 1; l < n; l++) {
+          const points: [number, number][] = [list[i], list[j], list[k], list[l]];
+          if (!areFourConcyclic(points)) continue;
+          const quad: Quadruple = [
+            points[0][0], points[0][1],
+            points[1][0], points[1][1],
+            points[2][0], points[2][1],
+            points[3][0], points[3][1],
+          ];
+          const key = quadrupleToKey(quad);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          result.push(quad);
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+function createPointingGameBoard(size: number): { blacks: Set<string>; answer: Set<string> } {
+  const allCells: string[] = [];
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      allCells.push(`${x},${y}`);
+    }
+  }
+
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const blacks = new Set<string>();
+    let guard = 0;
+
+    while (guard < size * size * 4) {
+      guard += 1;
+      const ng = mergeTripletMaps(
+        computeConcyclic(blacks, size, size),
+        computeLineNg(blacks, size, size)
+      );
+      const available = allCells.filter((k) => !blacks.has(k) && !ng.has(k));
+      if (available.length === 0) break;
+      const picked = available[Math.floor(Math.random() * available.length)];
+      blacks.add(picked);
+    }
+
+    const rest = allCells.filter((k) => !blacks.has(k));
+    if (rest.length === 0) continue;
+    blacks.add(rest[Math.floor(Math.random() * rest.length)]);
+
+    guard = 0;
+    let quads = findConcyclicQuadruples(blacks);
+
+    while (quads.length === 0 && guard < size * size * 3) {
+      guard += 1;
+      const candidates = allCells.filter((k) => !blacks.has(k));
+      if (candidates.length === 0) break;
+      blacks.add(candidates[Math.floor(Math.random() * candidates.length)]);
+      quads = findConcyclicQuadruples(blacks);
+    }
+
+    guard = 0;
+    while (quads.length > 1 && guard < size * size * 4) {
+      guard += 1;
+      const pickedQuad = quads[Math.floor(Math.random() * quads.length)];
+      const quadCells = [
+        `${pickedQuad[0]},${pickedQuad[1]}`,
+        `${pickedQuad[2]},${pickedQuad[3]}`,
+        `${pickedQuad[4]},${pickedQuad[5]}`,
+        `${pickedQuad[6]},${pickedQuad[7]}`,
+      ];
+      const toDelete = quadCells[Math.floor(Math.random() * quadCells.length)];
+      blacks.delete(toDelete);
+      quads = findConcyclicQuadruples(blacks);
+      if (quads.length === 0) {
+        const candidates = allCells.filter((k) => !blacks.has(k));
+        if (candidates.length > 0) {
+          blacks.add(candidates[Math.floor(Math.random() * candidates.length)]);
+          quads = findConcyclicQuadruples(blacks);
+        }
+      }
+    }
+
+    if (quads.length === 1) {
+      const q = quads[0];
+      const answer = new Set<string>([
+        `${q[0]},${q[1]}`,
+        `${q[2]},${q[3]}`,
+        `${q[4]},${q[5]}`,
+        `${q[6]},${q[7]}`,
+      ]);
+      return { blacks, answer };
+    }
+  }
+
+  return { blacks: createGameBoard(size, size), answer: new Set() };
+}
+
 export default function KyouenGamePage() {
   const [size, setSize] = useState(DEFAULT_SIZE);
   const [inputSize, setInputSize] = useState(String(DEFAULT_SIZE));
@@ -336,9 +500,13 @@ export default function KyouenGamePage() {
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [showAboutKyouen, setShowAboutKyouen] = useState(false);
+  const [sizeError, setSizeError] = useState<string | null>(null);
   const [gamePhase, setGamePhase] = useState<GamePhase>("idle");
   const [blueCell, setBlueCell] = useState<string | null>(null);
   const [gameResult, setGameResult] = useState<GameResult | null>(null);
+  const [pointingResult, setPointingResult] = useState<PointingResult | null>(null);
+  const [pointingSelection, setPointingSelection] = useState<Set<string>>(new Set());
+  const [pointingAnswer, setPointingAnswer] = useState<Set<string>>(new Set());
   const [failureTriplet, setFailureTriplet] = useState<Triplet | null>(null);
   const [activeReasonIndex, setActiveReasonIndex] = useState(0);
 
@@ -412,11 +580,47 @@ export default function KyouenGamePage() {
     return computeGreatSuccessCells(blacks, ngMap, size);
   }, [blacks, mode, ngMap, size]);
 
+  const pointAnswerNgCells = useMemo<Set<string>>(() => {
+    if (mode !== "point") return new Set();
+    if (pointingAnswer.size !== 4) return new Set();
+
+    const answerPoints: [number, number][] = Array.from(pointingAnswer).map((k) => {
+      const [x, y] = k.split(",").map(Number);
+      return [x, y];
+    });
+
+    const result = new Set<string>();
+    for (let i = 0; i < answerPoints.length - 2; i++) {
+      for (let j = i + 1; j < answerPoints.length - 1; j++) {
+        for (let k = j + 1; k < answerPoints.length; k++) {
+          const [x1, y1] = answerPoints[i];
+          const [x2, y2] = answerPoints[j];
+          const [x3, y3] = answerPoints[k];
+          const triplet: Triplet = [x1, y1, x2, y2, x3, y3];
+          const ngCells = getNgCellsForTriplet(triplet, size);
+          for (const cell of ngCells) {
+            if (!pointingAnswer.has(cell)) {
+              result.add(cell);
+            }
+          }
+        }
+      }
+    }
+
+    return result;
+  }, [mode, pointingAnswer, size]);
+
   // 盤面サイズ変更
   const handleApplySize = useCallback(() => {
     const s = parseInt(inputSize, 10);
     if (Number.isNaN(s)) return;
-    const cs = Math.max(3, Math.min(20, s));
+    if (s <= 3) {
+      setSizeError("サイズは4以上を入力してください。");
+      return;
+    }
+
+    const cs = Math.max(4, Math.min(20, s));
+    setSizeError(null);
     setSize(cs);
     setBlacks((prev) => {
       const next = new Set<string>();
@@ -430,6 +634,9 @@ export default function KyouenGamePage() {
     setActiveReasonIndex(0);
     setBlueCell(null);
     setGameResult(null);
+    setPointingResult(null);
+    setPointingSelection(new Set());
+    setPointingAnswer(new Set());
     setFailureTriplet(null);
     setGamePhase("idle");
   }, [inputSize]);
@@ -441,9 +648,41 @@ export default function KyouenGamePage() {
     setActiveReasonIndex(0);
     setBlueCell(null);
     setGameResult(null);
+    setPointingResult(null);
+    setPointingSelection(new Set());
+    setPointingAnswer(new Set());
     setFailureTriplet(null);
     setGamePhase("playing");
   }, [size]);
+
+  const handleStartPointing = useCallback(() => {
+    const generated = createPointingGameBoard(size);
+    setBlacks(generated.blacks);
+    setPointingAnswer(generated.answer);
+    setPointingSelection(new Set());
+    setPointingResult(null);
+    setSelectedCell(null);
+    setActiveReasonIndex(0);
+    setBlueCell(null);
+    setGameResult(null);
+    setFailureTriplet(null);
+    setGamePhase("playing");
+  }, [size]);
+
+  useEffect(() => {
+    if (mode !== "point") return;
+    if (gamePhase !== "playing") return;
+    if (pointingSelection.size !== 4) return;
+
+    const list: [number, number][] = Array.from(pointingSelection).map((k) => {
+      const [x, y] = k.split(",").map(Number);
+      return [x, y];
+    });
+
+    const success = areFourConcyclic(list);
+    setPointingResult(success ? "success" : "failure");
+    setGamePhase("answered");
+  }, [gamePhase, mode, pointingSelection]);
 
   const resetAll = useCallback(() => {
     setBlacks(new Set());
@@ -451,6 +690,9 @@ export default function KyouenGamePage() {
     setActiveReasonIndex(0);
     setBlueCell(null);
     setGameResult(null);
+    setPointingResult(null);
+    setPointingSelection(new Set());
+    setPointingAnswer(new Set());
     setFailureTriplet(null);
     setGamePhase("idle");
   }, []);
@@ -486,6 +728,19 @@ export default function KyouenGamePage() {
           setFailureTriplet(triplets[0]);
         }
         setGamePhase("answered");
+        return;
+      }
+
+      if (mode === "point") {
+        if (gamePhase !== "playing") return;
+        if (!blacks.has(key)) return;
+
+        setPointingSelection((prev) => {
+          const next = new Set(prev);
+          if (next.has(key)) next.delete(key);
+          else next.add(key);
+          return next;
+        });
         return;
       }
 
@@ -579,11 +834,17 @@ export default function KyouenGamePage() {
               </p>
               <p>赤いNGマスをクリックすると、その判定に関係する黒丸が赤くなります。もう一度クリックするか、盤面外をクリックすると元に戻ります。</p>
             </>
-          ) : (
+          ) : mode === "game" ? (
             <>
               <p>詰共円では、開始で黒丸がランダムに配置されます。共円マスとNGマスを避ける形で作られます。</p>
               <p>答えとして1マスをクリックすると、青丸が置かれて判定されます。共円でも4点一直線でもなければ成功です。</p>
               <p>盤面すべてをNGマスにする場所は大成功マスです。大成功マスを選べば「大成功」と表示され、それ以外を選んだあとには大成功マスに黄色の星が表示されます。</p>
+            </>
+          ) : (
+            <>
+              <p>指摘共円では、開始すると黒丸がランダムに配置されます。</p>
+              <p>黒丸を4つ選んだ時点で判定されます。4つ未満では判定されません。</p>
+              <p>選んだ4つが共円（一直線上の4点を含む）なら成功、そうでなければ失敗です。判定後は正解の4つの黒丸が赤く表示されます。</p>
             </>
           )}
         </div>
@@ -615,6 +876,9 @@ export default function KyouenGamePage() {
             setActiveReasonIndex(0);
             setBlueCell(null);
             setGameResult(null);
+            setPointingResult(null);
+            setPointingSelection(new Set());
+            setPointingAnswer(new Set());
             setFailureTriplet(null);
             setGamePhase("idle");
           }}
@@ -633,11 +897,35 @@ export default function KyouenGamePage() {
             setActiveReasonIndex(0);
             setBlueCell(null);
             setGameResult(null);
+            setPointingResult(null);
+            setPointingSelection(new Set());
+            setPointingAnswer(new Set());
             setFailureTriplet(null);
             setGamePhase("idle");
           }}
         >
           詰共円
+        </button>
+        <button
+          className={`px-4 py-2 rounded text-sm ${
+            mode === "point"
+              ? "bg-blue-600 text-white hover:bg-blue-700"
+              : "bg-gray-200 text-gray-800 hover:bg-gray-300"
+          }`}
+          onClick={() => {
+            setMode("point");
+            setSelectedCell(null);
+            setActiveReasonIndex(0);
+            setBlueCell(null);
+            setGameResult(null);
+            setPointingResult(null);
+            setPointingSelection(new Set());
+            setPointingAnswer(new Set());
+            setFailureTriplet(null);
+            setGamePhase("idle");
+          }}
+        >
+          指摘共円
         </button>
       </div>
 
@@ -646,6 +934,14 @@ export default function KyouenGamePage() {
           <button
             className="px-4 py-2 rounded text-sm bg-blue-600 text-white hover:bg-blue-700"
             onClick={handleStartGame}
+          >
+            開始
+          </button>
+        )}
+        {mode === "point" && gamePhase !== "playing" && (
+          <button
+            className="px-4 py-2 rounded text-sm bg-blue-600 text-white hover:bg-blue-700"
+            onClick={handleStartPointing}
           >
             開始
           </button>
@@ -667,10 +963,17 @@ export default function KyouenGamePage() {
           <label className="text-sm">サイズ:</label>
           <input
             type="number"
-            min="3"
+            min="4"
             max="20"
             value={inputSize}
-            onChange={(e) => setInputSize(e.target.value)}
+            onChange={(e) => {
+              const nextValue = e.target.value;
+              setInputSize(nextValue);
+              const parsed = parseInt(nextValue, 10);
+              if (!Number.isNaN(parsed) && parsed >= 4) {
+                setSizeError(null);
+              }
+            }}
             className="w-16 p-1 border rounded text-sm"
           />
         </div>
@@ -680,6 +983,7 @@ export default function KyouenGamePage() {
         >
           適用
         </button>
+        {sizeError && <span className="text-sm text-red-600">{sizeError}</span>}
       </div>
 
       {/* 盤面 */}
@@ -701,12 +1005,20 @@ export default function KyouenGamePage() {
               const isSelected = selectedCell === key;
               const isHighlighted = highlightedDots.has(key);
               const isBlue = blueCell === key;
+              const isPointSelected = pointingSelection.has(key);
               const isSelectedNgCell = selectedNgCells.has(key);
               const isFailureNgCell = failureNgCells.has(key);
               const isGreatSuccessCell = greatSuccessCells.has(key);
+              const isPointAnswer = pointingAnswer.has(key);
+              const isPointAnswerNgCell = pointAnswerNgCells.has(key);
+              const showGreenRing =
+                ((isSelectedNgCell || isFailureNgCell) && !isBlue) ||
+                (mode === "point" && gamePhase === "answered" && isPointAnswerNgCell);
 
               const showConcyclicBg =
-                mode === "free" ? isNgCell : gamePhase === "answered" && isNgCell;
+                mode === "free"
+                  ? isNgCell
+                  : mode === "game" && gamePhase === "answered" && isNgCell;
 
               let bgClass = "bg-white hover:bg-gray-100";
               if (showConcyclicBg) {
@@ -716,11 +1028,16 @@ export default function KyouenGamePage() {
                   bgClass = "bg-red-100 hover:bg-red-200";
                 }
               }
+              if (mode === "point" && isPointSelected) {
+                bgClass = "bg-blue-100 hover:bg-blue-200";
+              }
 
               const blackFill =
                 mode === "free"
                   ? (isHighlighted ? "#dc2626" : "#1a1a1a")
-                  : (gameResult === "failure" && failureDots.has(key) ? "#dc2626" : "#1a1a1a");
+                  : mode === "game"
+                    ? (gameResult === "failure" && failureDots.has(key) ? "#dc2626" : "#1a1a1a")
+                    : (gamePhase === "answered" && isPointAnswer ? "#dc2626" : "#1a1a1a");
 
               return (
                 <div
@@ -751,7 +1068,7 @@ export default function KyouenGamePage() {
                       />
                     </svg>
                   )}
-                  {(isSelectedNgCell || isFailureNgCell) && !isBlue && (
+                  {showGreenRing && (
                     <svg width="36" height="36" viewBox="0 0 36 36" className="absolute pointer-events-none">
                       <circle
                         cx="18"
@@ -801,6 +1118,26 @@ export default function KyouenGamePage() {
             : gameResult === "success"
             ? "成功: 青丸のマスは共円でも4点一直線でもありません。"
             : "失敗: 青丸のマスは共円、または4点一直線NGです。青丸が絡むNGを1つだけ赤で表示しています。"}
+        </div>
+      )}
+
+      {mode === "point" && gamePhase === "playing" && (
+        <div className="mt-4 p-3 bg-blue-50 border border-blue-300 rounded text-sm text-blue-700">
+          選択中: {pointingSelection.size} / 4（黒丸を4つ選ぶと自動で判定されます）
+        </div>
+      )}
+
+      {mode === "point" && pointingResult && (
+        <div
+          className={`mt-4 p-3 rounded text-sm border ${
+            pointingResult === "success"
+              ? "bg-green-50 border-green-300 text-green-700"
+              : "bg-red-50 border-red-300 text-red-700"
+          }`}
+        >
+          {pointingResult === "success"
+            ? "成功: 選んだ4つの黒丸は共円（一直線を含む）です。正解の4つを赤で表示しています。"
+            : "失敗: 選んだ4つの黒丸は共円（一直線を含む）ではありません。正解の4つを赤で表示しています。"}
         </div>
       )}
 
