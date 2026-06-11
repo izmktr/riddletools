@@ -335,6 +335,7 @@ export default function KyouenGamePage() {
   const [mode, setMode] = useState<Mode>("free");
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [showAboutKyouen, setShowAboutKyouen] = useState(false);
   const [gamePhase, setGamePhase] = useState<GamePhase>("idle");
   const [blueCell, setBlueCell] = useState<string | null>(null);
   const [gameResult, setGameResult] = useState<GameResult | null>(null);
@@ -554,6 +555,16 @@ export default function KyouenGamePage() {
         >
           {showHelp ? "閉じる" : "使い方"}
         </button>
+        <button
+          className={`px-4 py-2 rounded text-sm transition-colors ${
+            showAboutKyouen
+              ? "bg-gray-200 text-gray-800 hover:bg-gray-300"
+              : "bg-amber-100 text-amber-700 hover:bg-amber-200"
+          }`}
+          onClick={() => setShowAboutKyouen((v) => !v)}
+        >
+          {showAboutKyouen ? "閉じる" : "共円とは"}
+        </button>
       </div>
 
       {showHelp && (
@@ -575,6 +586,19 @@ export default function KyouenGamePage() {
               <p>盤面すべてをNGマスにする場所は大成功マスです。大成功マスを選べば「大成功」と表示され、それ以外を選んだあとには大成功マスに黄色の星が表示されます。</p>
             </>
           )}
+        </div>
+      )}
+
+      {showAboutKyouen && (
+        <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded text-sm leading-relaxed space-y-2" onClick={(e) => e.stopPropagation()}>
+          <p className="font-semibold">【ゲームの概要】</p>
+          <p>「共円（きょうえん）」は、盤面のマスに点を置いていく、幾何学パズルゲームです。</p>
+          <p>格子状の点の中から「円」や「直線」のパターンを見つけ出す直感力と、先を読む戦略性が試されます。</p>
+          <p className="font-semibold pt-1">【基本ルール】</p>
+          <p>以下の2つのパターンを作らないように、慎重に点を選んでいきます。</p>
+          <p>1. 共円を避ける： 4つの点が「同じ円周上」に並んではいけません。</p>
+          <p>2. 一直線を避ける： 4つの点が「一直線上」に並んではいけません。</p>
+          <p>※「詰共円」では、ランダムに置かれた黒丸を見て、ルールに抵触しない「安全な最後の一手」を探し出します。</p>
         </div>
       )}
 
