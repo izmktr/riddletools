@@ -31,6 +31,7 @@ export default function Home() {
   ];
   const Game = [
     ["モールス信号ゲーム", "/morse-game"],
+    ["共円ゲーム", "/kyouen-game"],
   ];
 
   // 色のグラデーション生成関数
