@@ -381,6 +381,93 @@ function quadrupleToKey(quad: Quadruple): string {
   return points.join("|");
 }
 
+function computeCircleParams(
+  x1: number, y1: number,
+  x2: number, y2: number,
+  x3: number, y3: number
+): { cx: number; cy: number; r: number } | null {
+  const a = x2 - x1;
+  const b = y2 - y1;
+  const c = x3 - x2;
+  const d = y3 - y2;
+  const det = a * d - b * c;
+  if (det === 0) return null; // 一直線
+
+  const s1 = x2 * x2 - x1 * x1 + y2 * y2 - y1 * y1;
+  const s2 = x3 * x3 - x2 * x2 + y3 * y3 - y2 * y2;
+  const twoDetCx = s1 * d - b * s2;
+  const twoDetCy = a * s2 - s1 * c;
+  const twoDet = 2 * det;
+
+  const cx = twoDetCx / twoDet;
+  const cy = twoDetCy / twoDet;
+
+  const dx = x1 - cx;
+  const dy = y1 - cy;
+  const r = Math.sqrt(dx * dx + dy * dy);
+
+  return { cx, cy, r };
+}
+
+/**
+ * 直線が盤面（0～size）を横切る両端の座標を計算
+ */
+function computeLineExtents(
+  x1: number, y1: number,
+  x2: number, y2: number,
+  size: number
+): [number, number, number, number] {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+
+  const candidates: [number, number][] = [];
+
+  // 左側（x=0）の交点
+  if (Math.abs(dx) > 1e-9) {
+    const y = y1 + dy * (0 - x1) / dx;
+    if (y >= -1e-9 && y <= size + 1e-9) {
+      candidates.push([0, Math.max(0, Math.min(size, y))]);
+    }
+  }
+
+  // 右側（x=size）の交点
+  if (Math.abs(dx) > 1e-9) {
+    const y = y1 + dy * (size - x1) / dx;
+    if (y >= -1e-9 && y <= size + 1e-9) {
+      candidates.push([size, Math.max(0, Math.min(size, y))]);
+    }
+  }
+
+  // 上側（y=0）の交点
+  if (Math.abs(dy) > 1e-9) {
+    const x = x1 + dx * (0 - y1) / dy;
+    if (x >= -1e-9 && x <= size + 1e-9) {
+      candidates.push([Math.max(0, Math.min(size, x)), 0]);
+    }
+  }
+
+  // 下側（y=size）の交点
+  if (Math.abs(dy) > 1e-9) {
+    const x = x1 + dx * (size - y1) / dy;
+    if (x >= -1e-9 && x <= size + 1e-9) {
+      candidates.push([Math.max(0, Math.min(size, x)), size]);
+    }
+  }
+
+  // dx=0 かつ dy=0 の場合（同一点）はそのまま返す
+  if (candidates.length === 0) {
+    return [x1, y1, x2, y2];
+  }
+
+  // 候補が 2 つ以上あれば、最初の 2 つを使う
+  if (candidates.length >= 2) {
+    return [candidates[0][0], candidates[0][1], candidates[1][0], candidates[1][1]];
+  }
+
+  // 候補が 1 つだけの場合はそれと反対方向の交点を計算
+  return [candidates[0][0], candidates[0][1], x2, y2];
+}
+
 function findConcyclicQuadruples(blacks: Set<string>): Quadruple[] {
   const list: [number, number][] = Array.from(blacks).map((k) => {
     const [x, y] = k.split(",").map(Number);
@@ -988,7 +1075,7 @@ export default function KyouenGamePage() {
 
       {/* 盤面 */}
       <div
-        className="inline-block"
+        className="inline-block relative"
         onClick={(e) => e.stopPropagation()}
       >
         <div
@@ -1093,6 +1180,178 @@ export default function KyouenGamePage() {
             })
           )}
         </div>
+
+        {/* 紫色の円・直線描画（フリー・ゲーム選択時） */}
+        {(() => {
+          let triplet: Triplet | null = null;
+          if (mode === "free" && selectedReasons.length > 0) {
+            triplet = selectedReasons[activeReasonIndex % selectedReasons.length];
+          } else if (mode === "game" && failureTriplet) {
+            triplet = failureTriplet;
+          }
+
+          if (!triplet) return null;
+
+          const [x1, y1, x2, y2, x3, y3] = triplet;
+          const displayX1 = x1 + 0.5;
+          const displayY1 = y1 + 0.5;
+          const displayX2 = x2 + 0.5;
+          const displayY2 = y2 + 0.5;
+          const displayX3 = x3 + 0.5;
+          const displayY3 = y3 + 0.5;
+          const circleParams = computeCircleParams(
+            displayX1,
+            displayY1,
+            displayX2,
+            displayY2,
+            displayX3,
+            displayY3
+          );
+
+          const boardSize = size * CELL_SIZE;
+
+          // 3点が直線上にある場合、盤面を横切る直線の端点を計算
+          let lineX1 = displayX1;
+          let lineY1 = displayY1;
+          let lineX2 = displayX3;
+          let lineY2 = displayY3;
+
+          if (!circleParams) {
+            const [extX1, extY1, extX2, extY2] = computeLineExtents(
+              displayX1,
+              displayY1,
+              displayX2,
+              displayY2,
+              size
+            );
+            lineX1 = extX1;
+            lineY1 = extY1;
+            lineX2 = extX2;
+            lineY2 = extY2;
+          }
+
+          return (
+            <svg
+              width={boardSize}
+              height={boardSize}
+              viewBox={`0 0 ${size} ${size}`}
+              className="absolute pointer-events-none"
+              style={{
+                position: "absolute",
+                left: "2px",
+                top: "2px",
+              }}
+            >
+              {circleParams ? (
+                <circle
+                  cx={circleParams.cx}
+                  cy={circleParams.cy}
+                  r={circleParams.r}
+                  fill="none"
+                  stroke="#a855f7"
+                  strokeWidth={0.08}
+                />
+              ) : (
+                // 一直線の場合は直線描画
+                <line
+                  x1={lineX1}
+                  y1={lineY1}
+                  x2={lineX2}
+                  y2={lineY2}
+                  stroke="#a855f7"
+                  strokeWidth={0.08}
+                />
+              )}
+            </svg>
+          );
+        })()}
+
+        {/* 4点用円・直線描画（指摘共円の答え表示時） */}
+        {(() => {
+          if (mode !== "point" || gamePhase !== "answered" || pointingAnswer.size !== 4) {
+            return null;
+          }
+
+          const answerPoints: [number, number][] = Array.from(pointingAnswer).map((k) => {
+            const [x, y] = k.split(",").map(Number);
+            return [x, y];
+          });
+
+          const [p1, p2, p3, p4] = answerPoints;
+          const displayP1: [number, number] = [p1[0] + 0.5, p1[1] + 0.5];
+          const displayP2: [number, number] = [p2[0] + 0.5, p2[1] + 0.5];
+          const displayP3: [number, number] = [p3[0] + 0.5, p3[1] + 0.5];
+          const displayP4: [number, number] = [p4[0] + 0.5, p4[1] + 0.5];
+
+          const circleParams = computeCircleParams(
+            displayP1[0],
+            displayP1[1],
+            displayP2[0],
+            displayP2[1],
+            displayP3[0],
+            displayP3[1]
+          );
+
+          const boardSize = size * CELL_SIZE;
+          const isCollinear4 = isCollinear(p1[0], p1[1], p2[0], p2[1], p3[0], p3[1]) &&
+                               isCollinear(p1[0], p1[1], p2[0], p2[1], p4[0], p4[1]);
+
+          // 4点が直線上にある場合、盤面を横切る直線の端点を計算
+          let lineX1 = displayP1[0];
+          let lineY1 = displayP1[1];
+          let lineX2 = displayP4[0];
+          let lineY2 = displayP4[1];
+
+          if (isCollinear4) {
+            const [extX1, extY1, extX2, extY2] = computeLineExtents(
+              displayP1[0],
+              displayP1[1],
+              displayP2[0],
+              displayP2[1],
+              size
+            );
+            lineX1 = extX1;
+            lineY1 = extY1;
+            lineX2 = extX2;
+            lineY2 = extY2;
+          }
+
+          return (
+            <svg
+              width={boardSize}
+              height={boardSize}
+              viewBox={`0 0 ${size} ${size}`}
+              className="absolute pointer-events-none"
+              style={{
+                position: "absolute",
+                left: "2px",
+                top: "2px",
+              }}
+            >
+              {isCollinear4 || !circleParams ? (
+                // 一直線の場合は直線描画
+                <line
+                  x1={lineX1}
+                  y1={lineY1}
+                  x2={lineX2}
+                  y2={lineY2}
+                  stroke="#a855f7"
+                  strokeWidth={0.08}
+                />
+              ) : (
+                // 共円の場合は円描画
+                <circle
+                  cx={circleParams.cx}
+                  cy={circleParams.cy}
+                  r={circleParams.r}
+                  fill="none"
+                  stroke="#a855f7"
+                  strokeWidth={0.08}
+                />
+              )}
+            </svg>
+          );
+        })()}
       </div>
 
       {/* 選択中の情報パネル */}
