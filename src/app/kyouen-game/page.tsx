@@ -794,6 +794,9 @@ export default function KyouenGamePage() {
         if (gamePhase !== "playing") {
           return;
         }
+        if (blacks.has(key)) {
+          return;
+        }
 
         setBlueCell(key);
         setSelectedCell(null);
@@ -1377,6 +1380,12 @@ export default function KyouenGamePage() {
             : gameResult === "success"
             ? "成功: 青丸のマスは共円でも4点一直線でもありません。"
             : "失敗: 青丸のマスは共円、または4点一直線NGです。青丸が絡むNGを1つだけ赤で表示しています。"}
+        </div>
+      )}
+
+      {mode === "game" && gamePhase === "playing" && (
+        <div className="mt-4 p-3 bg-blue-50 border border-blue-300 rounded text-sm text-blue-700">
+          共円にならない空きマスを選んでください
         </div>
       )}
 
