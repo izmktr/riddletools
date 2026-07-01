@@ -899,7 +899,7 @@ export const parsePuzzle = (input: string): ParsedPuzzle => {
     let expandedText = text;
     for (const tag of tags) {
       // パターン: セット名(=|!=)タグ名 の形式を検出して、セット名.タグ名(=|!=)タグ名.値1に置換
-      const pattern = new RegExp(`(\\w+)(=|!=)${tag.name}(?=[-:&,)|\\s]|$)`, "g");
+      const pattern = new RegExp(`([^.,\\[\\]()\\s!=:|&^\\-]+)(=|!=)${tag.name}(?=[-:&,)|\\s]|$)`, "g");
       expandedText = expandedText.replace(pattern, `$1.${tag.name}$2${tag.name}.${tag.values[0]}`);
     }
 

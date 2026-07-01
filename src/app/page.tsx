@@ -20,7 +20,7 @@ export default function Home() {
     ["しりとりソルバー", "/shiritori"],
     ["スケルトンソルバー", "/skeleton"],
     ["覆面算ソルバー", "/cryptarithmetic"],
-    ["推理パズルソルバー", "/deduction"],
+    ["論理パズルソルバー", "/deduction"],
     ["中国剰余定理", "/chinese-remainder"],
     ["回文ソルバー", "/palindrome"],
     ["迷路ソルバー", "/maze"],
