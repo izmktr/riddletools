@@ -268,6 +268,304 @@ function computeGreatSuccessCells(
   return result;
 }
 
+function getCellKey(x: number, y: number): string {
+  return `${x},${y}`;
+}
+
+function getPointsFromCells(cells: Set<string>): [number, number][] {
+  return Array.from(cells).map((k) => {
+    const [x, y] = k.split(",").map(Number);
+    return [x, y] as [number, number];
+  });
+}
+
+function getPointSet(points: [number, number][]): Set<string> {
+  return new Set(points.map(([x, y]) => getCellKey(x, y)));
+}
+
+function hasVerticalSymmetry(points: [number, number][]): boolean {
+  const pointSet = getPointSet(points);
+  const candidates = new Set<number>();
+
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      if (points[i][1] !== points[j][1]) continue;
+      candidates.add(points[i][0] + points[j][0]);
+    }
+  }
+
+  for (const axisTwice of candidates) {
+    let ok = true;
+    for (const [x, y] of points) {
+      if (!pointSet.has(getCellKey(axisTwice - x, y))) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return true;
+  }
+
+  return false;
+}
+
+function hasHorizontalSymmetry(points: [number, number][]): boolean {
+  const pointSet = getPointSet(points);
+  const candidates = new Set<number>();
+
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      if (points[i][0] !== points[j][0]) continue;
+      candidates.add(points[i][1] + points[j][1]);
+    }
+  }
+
+  for (const axisTwice of candidates) {
+    let ok = true;
+    for (const [x, y] of points) {
+      if (!pointSet.has(getCellKey(x, axisTwice - y))) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return true;
+  }
+
+  return false;
+}
+
+function hasDiagonalSymmetry(points: [number, number][]): boolean {
+  const slopeUpPointSet = new Set(points.map(([x, y]) => `${x + y}|${y - x}`));
+  const slopeUpCandidates = new Set<number>();
+
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      if (points[i][0] + points[i][1] !== points[j][0] + points[j][1]) continue;
+      slopeUpCandidates.add((points[i][1] - points[i][0]) + (points[j][1] - points[j][0]));
+    }
+  }
+
+  for (const axisTwice of slopeUpCandidates) {
+    let ok = true;
+    for (const [x, y] of points) {
+      const preserved = x + y;
+      const reflected = axisTwice - (y - x);
+      if (!slopeUpPointSet.has(`${preserved}|${reflected}`)) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return true;
+  }
+
+  const slopeDownPointSet = new Set(points.map(([x, y]) => `${x - y}|${x + y}`));
+  const slopeDownCandidates = new Set<number>();
+
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      if (points[i][0] - points[i][1] !== points[j][0] - points[j][1]) continue;
+      slopeDownCandidates.add((points[i][0] + points[i][1]) + (points[j][0] + points[j][1]));
+    }
+  }
+
+  for (const axisTwice of slopeDownCandidates) {
+    let ok = true;
+    for (const [x, y] of points) {
+      const preserved = x - y;
+      const reflected = axisTwice - (x + y);
+      if (!slopeDownPointSet.has(`${preserved}|${reflected}`)) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return true;
+  }
+
+  return false;
+}
+
+function hasPointSymmetry(points: [number, number][]): boolean {
+  const pointSet = getPointSet(points);
+  const candidates = new Set<string>();
+
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      candidates.add(`${points[i][0] + points[j][0]},${points[i][1] + points[j][1]}`);
+    }
+  }
+
+  for (const candidate of candidates) {
+    const [centerXTwice, centerYTwice] = candidate.split(",").map(Number);
+    let ok = true;
+    for (const [x, y] of points) {
+      if (!pointSet.has(getCellKey(centerXTwice - x, centerYTwice - y))) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return true;
+  }
+
+  return false;
+}
+
+function findCircleDescriptor(points: [number, number][]): {
+  triplet: Triplet;
+  params: { cx: number; cy: number; r: number };
+} | null {
+  for (let i = 0; i < points.length - 2; i++) {
+    for (let j = i + 1; j < points.length - 1; j++) {
+      for (let k = j + 1; k < points.length; k++) {
+        const [x1, y1] = points[i];
+        const [x2, y2] = points[j];
+        const [x3, y3] = points[k];
+        const params = computeCircleParams(x1, y1, x2, y2, x3, y3);
+        if (!params) continue;
+        return {
+          triplet: [x1, y1, x2, y2, x3, y3],
+          params,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function buildPointingHints(
+  blacks: Set<string>,
+  answer: Set<string>,
+  size: number,
+  highlightedPoints: Set<string>,
+  shownHintIds: Set<string>
+): PointingHint[] {
+  if (answer.size !== 4) return [];
+
+  const answerPoints = getPointsFromCells(answer);
+  const hints: PointingHint[] = [];
+  const pushHint = (hint: PointingHint) => {
+    if (shownHintIds.has(hint.id)) return;
+    hints.push(hint);
+  };
+
+  if (hasVerticalSymmetry(answerPoints)) {
+    pushHint({
+      id: "symmetry-vertical",
+      kind: "text",
+      message: "垂直な線で線対称です",
+    });
+  }
+
+  if (hasHorizontalSymmetry(answerPoints)) {
+    pushHint({
+      id: "symmetry-horizontal",
+      kind: "text",
+      message: "水平な線で線対称です",
+    });
+  }
+
+  if (hasDiagonalSymmetry(answerPoints)) {
+    pushHint({
+      id: "symmetry-diagonal",
+      kind: "text",
+      message: "斜め45度の線で線対称です",
+    });
+  }
+
+  if (hasPointSymmetry(answerPoints)) {
+    pushHint({
+      id: "symmetry-point",
+      kind: "text",
+      message: "4つの点は点対称です",
+    });
+  }
+
+  const lineCollinear = isCollinear(
+    answerPoints[0][0], answerPoints[0][1],
+    answerPoints[1][0], answerPoints[1][1],
+    answerPoints[2][0], answerPoints[2][1]
+  ) && isCollinear(
+    answerPoints[0][0], answerPoints[0][1],
+    answerPoints[1][0], answerPoints[1][1],
+    answerPoints[3][0], answerPoints[3][1]
+  );
+
+  if (lineCollinear) {
+    pushHint({
+      id: "line-collinear",
+      kind: "text",
+      message: "直線状にならんでいます",
+    });
+  }
+
+  const circleDescriptor = findCircleDescriptor(answerPoints);
+  if (circleDescriptor) {
+    const diameter = circleDescriptor.params.r * 2;
+    const roundedDiameter = Math.round(diameter);
+
+    if (roundedDiameter <= size) {
+      pushHint({
+        id: "circle-diameter-approx",
+        kind: "text",
+        message: `円の直径は約${roundedDiameter}です`,
+      });
+    } else if (diameter >= size + 1) {
+      pushHint({
+        id: "circle-diameter-at-least",
+        kind: "text",
+        message: `円の直径は${size + 1}以上です`,
+      });
+    }
+
+    const [x1, y1, x2, y2, x3, y3] = circleDescriptor.triplet;
+    const answerSet = new Set(answer);
+    let extraPointFound = false;
+
+    for (let y = 0; y < size && !extraPointFound; y++) {
+      for (let x = 0; x < size; x++) {
+        const key = getCellKey(x, y);
+        if (answerSet.has(key)) continue;
+        if (isOnCircumcircle(x1, y1, x2, y2, x3, y3, x, y)) {
+          extraPointFound = true;
+          break;
+        }
+      }
+    }
+
+    if (extraPointFound) {
+      pushHint({
+        id: "circle-extra-point",
+        kind: "text",
+        message: "盤面に4点以外の円上にある点があります",
+      });
+    }
+  }
+
+  for (const [x, y] of answerPoints) {
+    const key = getCellKey(x, y);
+    if (highlightedPoints.has(key)) continue;
+    if (shownHintIds.has(`point-${key}`)) continue;
+    hints.push({
+      id: `point-${key}`,
+      kind: "point",
+      pointKey: key,
+      message: "正解の点の1つをハイライトしました",
+    });
+  }
+
+  return hints;
+}
+
+function pickPointingHint(
+  hints: PointingHint[],
+  highlightedPointsCount: number
+): PointingHint | null {
+  if (hints.length === 0) return null;
+
+  const nonPointHints = hints.filter((hint) => hint.kind !== "point");
+  const pool = highlightedPointsCount >= 2 && nonPointHints.length > 0 ? nonPointHints : hints;
+  return pool[Math.floor(Math.random() * pool.length)] ?? null;
+}
+
 // ==========================================
 // コンポーネント
 // ==========================================
@@ -280,6 +578,14 @@ type GamePhase = "idle" | "playing" | "answered";
 type GameResult = "success" | "failure" | "bigSuccess";
 type PointingResult = "success" | "failure";
 type Quadruple = [number, number, number, number, number, number, number, number];
+type PointingHintKind = "text" | "point";
+
+type PointingHint = {
+  id: string;
+  kind: PointingHintKind;
+  message: string;
+  pointKey?: string;
+};
 
 const shuffle = <T,>(arr: T[]): T[] => {
   const next = [...arr];
@@ -594,6 +900,7 @@ export default function KyouenGamePage() {
   const [pointingResult, setPointingResult] = useState<PointingResult | null>(null);
   const [pointingSelection, setPointingSelection] = useState<Set<string>>(new Set());
   const [pointingAnswer, setPointingAnswer] = useState<Set<string>>(new Set());
+  const [pointingHints, setPointingHints] = useState<PointingHint[]>([]);
   const [failureTriplet, setFailureTriplet] = useState<Triplet | null>(null);
   const [activeReasonIndex, setActiveReasonIndex] = useState(0);
 
@@ -697,6 +1004,29 @@ export default function KyouenGamePage() {
     return result;
   }, [mode, pointingAnswer, size]);
 
+  const pointingHintCells = useMemo<Set<string>>(() => {
+    const cells = new Set<string>();
+    for (const hint of pointingHints) {
+      if (hint.kind !== "point" || !hint.pointKey) continue;
+      cells.add(hint.pointKey);
+    }
+    return cells;
+  }, [pointingHints]);
+
+  const pointingHintIds = useMemo<Set<string>>(() => {
+    return new Set(pointingHints.map((hint) => hint.id));
+  }, [pointingHints]);
+
+  const availablePointingHints = useMemo<PointingHint[]>(() => {
+    if (mode !== "point" || gamePhase !== "playing") return [];
+    return buildPointingHints(blacks, pointingAnswer, size, pointingHintCells, pointingHintIds);
+  }, [blacks, gamePhase, mode, pointingAnswer, pointingHintCells, pointingHintIds, size]);
+
+  const hintDisabled =
+    mode !== "point" ||
+    gamePhase === "answered" ||
+    (gamePhase === "playing" && availablePointingHints.length === 0);
+
   // 盤面サイズ変更
   const handleApplySize = useCallback(() => {
     const s = parseInt(inputSize, 10);
@@ -724,9 +1054,24 @@ export default function KyouenGamePage() {
     setPointingResult(null);
     setPointingSelection(new Set());
     setPointingAnswer(new Set());
+    setPointingHints([]);
     setFailureTriplet(null);
     setGamePhase("idle");
   }, [inputSize]);
+
+  const startPointingGame = useCallback((generated: { blacks: Set<string>; answer: Set<string> }) => {
+    setBlacks(new Set(generated.blacks));
+    setPointingAnswer(new Set(generated.answer));
+    setPointingSelection(new Set());
+    setPointingResult(null);
+    setSelectedCell(null);
+    setActiveReasonIndex(0);
+    setBlueCell(null);
+    setGameResult(null);
+    setPointingHints([]);
+    setFailureTriplet(null);
+    setGamePhase("playing");
+  }, []);
 
   const handleStartGame = useCallback(() => {
     const generated = createGameBoard(size, size);
@@ -738,23 +1083,45 @@ export default function KyouenGamePage() {
     setPointingResult(null);
     setPointingSelection(new Set());
     setPointingAnswer(new Set());
+    setPointingHints([]);
     setFailureTriplet(null);
     setGamePhase("playing");
   }, [size]);
 
   const handleStartPointing = useCallback(() => {
-    const generated = createPointingGameBoard(size);
-    setBlacks(generated.blacks);
-    setPointingAnswer(generated.answer);
-    setPointingSelection(new Set());
-    setPointingResult(null);
-    setSelectedCell(null);
-    setActiveReasonIndex(0);
-    setBlueCell(null);
-    setGameResult(null);
-    setFailureTriplet(null);
-    setGamePhase("playing");
-  }, [size]);
+    startPointingGame(createPointingGameBoard(size));
+  }, [size, startPointingGame]);
+
+  const handleHint = useCallback(() => {
+    if (mode !== "point" || gamePhase === "answered") return;
+
+    let currentBlacks = blacks;
+    let currentAnswer = pointingAnswer;
+    let currentHighlightedPoints = pointingHintCells;
+    let currentShownHintIds = pointingHintIds;
+
+    if (gamePhase === "idle" || currentAnswer.size !== 4) {
+      const generated = createPointingGameBoard(size);
+      currentBlacks = generated.blacks;
+      currentAnswer = generated.answer;
+      currentHighlightedPoints = new Set();
+      currentShownHintIds = new Set();
+      startPointingGame(generated);
+    }
+
+    const candidates = buildPointingHints(
+      currentBlacks,
+      currentAnswer,
+      size,
+      currentHighlightedPoints,
+      currentShownHintIds
+    );
+    const picked = pickPointingHint(candidates, currentHighlightedPoints.size);
+
+    if (!picked) return;
+
+    setPointingHints((prev) => [...prev, picked]);
+  }, [blacks, gamePhase, mode, pointingAnswer, pointingHintCells, pointingHintIds, size, startPointingGame]);
 
   useEffect(() => {
     if (mode !== "point") return;
@@ -780,6 +1147,7 @@ export default function KyouenGamePage() {
     setPointingResult(null);
     setPointingSelection(new Set());
     setPointingAnswer(new Set());
+    setPointingHints([]);
     setFailureTriplet(null);
     setGamePhase("idle");
   }, []);
@@ -969,6 +1337,7 @@ export default function KyouenGamePage() {
             setPointingResult(null);
             setPointingSelection(new Set());
             setPointingAnswer(new Set());
+            setPointingHints([]);
             setFailureTriplet(null);
             setGamePhase("idle");
           }}
@@ -990,6 +1359,7 @@ export default function KyouenGamePage() {
             setPointingResult(null);
             setPointingSelection(new Set());
             setPointingAnswer(new Set());
+            setPointingHints([]);
             setFailureTriplet(null);
             setGamePhase("idle");
           }}
@@ -1011,6 +1381,7 @@ export default function KyouenGamePage() {
             setPointingResult(null);
             setPointingSelection(new Set());
             setPointingAnswer(new Set());
+            setPointingHints([]);
             setFailureTriplet(null);
             setGamePhase("idle");
           }}
@@ -1042,6 +1413,15 @@ export default function KyouenGamePage() {
         >
           リセット
         </button>
+        {mode === "point" && (
+          <button
+            className="px-4 py-2 rounded text-sm bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={handleHint}
+            disabled={hintDisabled}
+          >
+            ヒント
+          </button>
+        )}
       </div>
 
       {/* 盤面サイズ変更（盤面直上） */}
@@ -1101,9 +1481,11 @@ export default function KyouenGamePage() {
               const isGreatSuccessCell = greatSuccessCells.has(key);
               const isPointAnswer = pointingAnswer.has(key);
               const isPointAnswerNgCell = pointAnswerNgCells.has(key);
+              const isHintPoint = pointingHintCells.has(key);
               const showGreenRing =
                 ((isSelectedNgCell || isFailureNgCell) && !isBlue) ||
                 (mode === "point" && gamePhase === "answered" && isPointAnswerNgCell);
+              const showHintRing = mode === "point" && gamePhase !== "answered" && isHintPoint;
 
               const showConcyclicBg =
                 mode === "free"
@@ -1167,6 +1549,26 @@ export default function KyouenGamePage() {
                         fill="none"
                         stroke="#16a34a"
                         strokeWidth="2"
+                      />
+                    </svg>
+                  )}
+                  {showHintRing && (
+                    <svg width="36" height="36" viewBox="0 0 36 36" className="absolute pointer-events-none">
+                      <circle
+                        cx="18"
+                        cy="18"
+                        r="13"
+                        fill="none"
+                        stroke="rgba(255, 214, 10, 0.45)"
+                        strokeWidth="6"
+                      />
+                      <circle
+                        cx="18"
+                        cy="18"
+                        r="12"
+                        fill="none"
+                        stroke="#fde047"
+                        strokeWidth="3.5"
                       />
                     </svg>
                   )}
@@ -1406,6 +1808,19 @@ export default function KyouenGamePage() {
           {pointingResult === "success"
             ? "成功: 選んだ4つの黒丸は共円（一直線を含む）です。正解の4つを赤で表示しています。"
             : "失敗: 選んだ4つの黒丸は共円（一直線を含む）ではありません。正解の4つを赤で表示しています。"}
+        </div>
+      )}
+
+      {mode === "point" && pointingHints.length > 0 && (
+        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded text-sm space-y-2">
+          <div className="font-semibold text-amber-800">ヒント</div>
+          <ul className="space-y-1 text-amber-900">
+            {pointingHints.map((hint, index) => (
+              <li key={`${hint.id}-${index}`}>
+                ・{hint.message}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
