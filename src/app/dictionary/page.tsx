@@ -35,6 +35,8 @@ async function fetchCsvText(url: string, label: string): Promise<string> {
 }
 
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+const INITIAL_DISPLAY_LIMIT = 50;
+const MAX_SEARCH_RESULTS = 500;
 
 export default function DictionaryPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -51,7 +53,6 @@ export default function DictionaryPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [resultExceeded, setResultExceeded] = useState(false);
   const [sortState, setSortState] = useState<{ col: number; direction: "asc" | "desc" } | null>(null);
-  const MAX_RESULTS = 50;
 
   // dic/index.csv を読み込む
   useEffect(() => {
@@ -114,7 +115,6 @@ export default function DictionaryPage() {
         setMatchedCells(new Set());
         setHasSearched(false);
         setResultExceeded(false);
-        setSearchText("");
         setSortState(null);
       })
       .catch((e) => {
@@ -169,7 +169,7 @@ export default function DictionaryPage() {
       }
       if (rowHit) {
         matchedRowCount++;
-        if (matchedRowCount > MAX_RESULTS) {
+        if (matchedRowCount > MAX_SEARCH_RESULTS) {
           exceeded = true;
           break;
         }
@@ -192,11 +192,11 @@ export default function DictionaryPage() {
   const visibleRows = rows
     .map((row, ri) => ({ row, ri }))
     .filter(({ ri }) => {
-      if (!hasSearched) return ri < MAX_RESULTS;
+      if (!hasSearched) return ri < INITIAL_DISPLAY_LIMIT;
       return headers.some((_, ci) => matchedCells.has(`${ri}-${ci}`));
     });
 
-  const baseDisplayedRows = visibleRows.slice(0, MAX_RESULTS);
+  const baseDisplayedRows = visibleRows.slice(0, hasSearched ? MAX_SEARCH_RESULTS : INITIAL_DISPLAY_LIMIT);
 
   const displayedRows = sortState
     ? [...baseDisplayedRows].sort((a, b) => {
@@ -208,11 +208,11 @@ export default function DictionaryPage() {
     : baseDisplayedRows;
 
   const resultCountLabel = !hasSearched
-    ? rows.length > MAX_RESULTS
+    ? rows.length > INITIAL_DISPLAY_LIMIT
       ? `表示${displayedRows.length}件（全${rows.length}件）`
       : `全${rows.length}件`
     : resultExceeded
-      ? `${MAX_RESULTS}件以上`
+      ? `${MAX_SEARCH_RESULTS}件以上`
       : `${displayedRows.length}件`;
 
   const handleSingleColCopy = (ci: number) => {
@@ -260,7 +260,6 @@ export default function DictionaryPage() {
       setMatchedCells(new Set());
       setHasSearched(false);
       setResultExceeded(false);
-      setSearchText("");
       setSelectedDic("");
       setSortState(null);
     } catch (err) {
@@ -304,7 +303,9 @@ export default function DictionaryPage() {
           <h2 className="font-bold mb-2">使い方</h2>
           <ol className="list-decimal list-inside space-y-1.5">
             <li>「辞書選択」で使いたい辞書を選びます。</li>
+            <li>辞書の切り替えやCSVの読み込みでも検索ワードは保持されます。新しい辞書を検索するには、再度「検索」を押してください。</li>
             <li>検索ワードを入力して「検索」ボタン（またはEnterキー）を押すと、ヒットした行がハイライト表示されます。</li>
+            <li>検索前は先頭{INITIAL_DISPLAY_LIMIT}件、検索後は一致した行を最大{MAX_SEARCH_RESULTS}件表示します。</li>
             <li>
               <span className="font-semibold">部分一致</span>：入力文字列が含まれる行を検索します。
             </li>
@@ -455,7 +456,7 @@ export default function DictionaryPage() {
       {/* 最大件数超過警告 */}
       {resultExceeded && (
         <div className="mb-3 px-4 py-2 bg-yellow-100 text-yellow-800 border border-yellow-300 rounded">
-          最大件数を超えました（先頭50件のみ表示）
+          最大件数を超えました（先頭{MAX_SEARCH_RESULTS}件のみ表示）
         </div>
       )}
 
