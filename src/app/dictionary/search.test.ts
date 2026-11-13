@@ -36,5 +36,21 @@ describe("dictionary search helpers", () => {
       expect(matchAnagram("あ.", "いあ")).toBe(true);
       expect(matchAnagram("あ.", "あいう")).toBe(false);
     });
+
+    test("文字クラスの数量を指定でき、同じ文字は重複して選ばない", () => {
+      expect(matchAnagram("[あいうえお]{3}", "うあい")).toBe(true);
+      expect(matchAnagram("[あいうえお]{3}", "ああい")).toBe(false);
+      expect(matchAnagram("[あいうえお]{3}", "あいうえ")).toBe(false);
+    });
+
+    test("数量の範囲、上限のみ、下限のみを指定できる", () => {
+      expect(matchAnagram("[あいうえお]{2,4}", "あい")).toBe(true);
+      expect(matchAnagram("[あいうえお]{2,4}", "あいうえ")).toBe(true);
+      expect(matchAnagram("[あいうえお]{2,4}", "あ")).toBe(false);
+      expect(matchAnagram("[あいうえお]{,4}", "")).toBe(true);
+      expect(matchAnagram("[あいうえお]{,4}", "あいうえお")).toBe(false);
+      expect(matchAnagram("[あいうえお]{2,}", "あいうえお")).toBe(true);
+      expect(matchAnagram("[あいうえお]{2,}", "あ")).toBe(false);
+    });
   });
 });

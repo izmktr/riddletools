@@ -313,7 +313,7 @@ export default function DictionaryPage() {
               <span className="font-semibold">正規表現</span>：正規表現パターンで検索します。例: <code className="bg-white px-1 rounded border">^あ</code>
             </li>
             <li>
-              <span className="font-semibold">アナグラム</span>：文字の並び替えで一致する行を検索します。<code className="bg-white px-1 rounded border">.</code>は任意の1文字、<code className="bg-white px-1 rounded border">[あいう]</code>はいずれか1文字にマッチします。
+              <span className="font-semibold">アナグラム</span>：文字の並び替えで一致する行を検索します。<code className="bg-white px-1 rounded border">.</code>は任意の1文字、<code className="bg-white px-1 rounded border">[あいう]</code>はいずれか1文字にマッチします。文字クラスの後ろに<code className="bg-white px-1 rounded border">{"{3}"}</code>、<code className="bg-white px-1 rounded border">{"{2,4}"}</code>、<code className="bg-white px-1 rounded border">{"{,4}"}</code>、<code className="bg-white px-1 rounded border">{"{2,}"}</code>を付けて文字数を指定できます。数量指定では同じ文字を重複して選びません。
             </li>
             <li>
               <span className="font-semibold">ナンクロ</span>：完全一致で検索します。<code className="bg-white px-1 rounded border">.</code>は任意の1文字、<code className="bg-white px-1 rounded border">*</code>は0文字以上の任意の文字列、<code className="bg-white px-1 rounded border">1</code>から<code className="bg-white px-1 rounded border">9</code>は任意の1文字で、同じ数字は同じ文字に一致します。<code className="bg-white px-1 rounded border">[あいう]</code>は括弧内のどれか1文字に一致します。数字そのものは検索できません。
