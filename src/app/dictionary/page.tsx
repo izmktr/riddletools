@@ -316,7 +316,7 @@ export default function DictionaryPage() {
               <span className="font-semibold">アナグラム</span>：文字の並び替えで一致する行を検索します。<code className="bg-white px-1 rounded border">.</code>は任意の1文字、<code className="bg-white px-1 rounded border">[あいう]</code>はいずれか1文字にマッチします。文字クラスの後ろに<code className="bg-white px-1 rounded border">{"{3}"}</code>、<code className="bg-white px-1 rounded border">{"{2,4}"}</code>、<code className="bg-white px-1 rounded border">{"{,4}"}</code>、<code className="bg-white px-1 rounded border">{"{2,}"}</code>を付けて文字数を指定できます。数量指定では同じ文字を重複して選びません。
             </li>
             <li>
-              <span className="font-semibold">ナンクロ</span>：完全一致で検索します。<code className="bg-white px-1 rounded border">.</code>は任意の1文字、<code className="bg-white px-1 rounded border">*</code>は0文字以上の任意の文字列、<code className="bg-white px-1 rounded border">1</code>から<code className="bg-white px-1 rounded border">9</code>は任意の1文字で、同じ数字は同じ文字に一致します。<code className="bg-white px-1 rounded border">[あいう]</code>は括弧内のどれか1文字に一致します。数字そのものは検索できません。
+              <span className="font-semibold">文字パターン（ナンクロ形式）</span>：完全一致で検索します。<code className="bg-white px-1 rounded border">.</code>は任意の1文字、<code className="bg-white px-1 rounded border">*</code>は0文字以上の任意の文字列、<code className="bg-white px-1 rounded border">1</code>から<code className="bg-white px-1 rounded border">9</code>は任意の1文字で、同じ数字は同じ文字に一致します。<code className="bg-white px-1 rounded border">[あいう]</code>は括弧内のどれか1文字に一致します。数字そのものは検索できません。
             </li>
             <li>カラム見出しをクリックすると、そのカラムだけを検索対象に絞れます（複数選択可）。</li>
             <li>カラム見出し右側のボタンで、左は現在表示中データの並び替え、右は現在表示中のその列の値をコピーできます。</li>
@@ -367,7 +367,7 @@ export default function DictionaryPage() {
               checked={searchType === "nankuro"}
               onChange={() => setSearchType("nankuro")}
             />
-            ナンクロ
+            文字パターン
           </label>
         </div>
 
