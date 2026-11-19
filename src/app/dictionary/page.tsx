@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import { matchAnagram, matchNankuro } from "./search";
+import { matchAnagram, matchNankuroPatterns } from "./search";
 
 type DicEntry = { name: string; file: string };
 
@@ -37,6 +37,8 @@ async function fetchCsvText(url: string, label: string): Promise<string> {
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 const INITIAL_DISPLAY_LIMIT = 50;
 const MAX_SEARCH_RESULTS = 500;
+const INVALID_NANKURO_PATTERN_MESSAGE =
+  '文字パターンの形式が正しくありません。「+」を使う場合は最初の数字に付けてください（例: 1+1）。「11+」は使えません。';
 
 export default function DictionaryPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -51,6 +53,7 @@ export default function DictionaryPage() {
   const [matchedCells, setMatchedCells] = useState<Set<string>>(new Set());
   const [hasSearched, setHasSearched] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [patternError, setPatternError] = useState<string | null>(null);
   const [resultExceeded, setResultExceeded] = useState(false);
   const [sortState, setSortState] = useState<{ col: number; direction: "asc" | "desc" } | null>(null);
 
@@ -128,6 +131,7 @@ export default function DictionaryPage() {
   const handleSearch = useCallback(() => {
     setHasSearched(true);
     setResultExceeded(false);
+    setPatternError(null);
     if (searchText.trim() === "") {
       setMatchedCells(new Set());
       setHasSearched(false);
@@ -137,6 +141,52 @@ export default function DictionaryPage() {
       selectedCols.every((v) => !v)
         ? headers.map(() => true)
         : selectedCols;
+
+    if (searchType === "nankuro") {
+      const candidateCells: { rowIdx: number; columnIndex: number; value: string }[] = [];
+      rows.forEach((row, rowIdx) => {
+        headers.forEach((_, columnIndex) => {
+          if (activeCols[columnIndex]) {
+            candidateCells.push({ rowIdx, columnIndex, value: row[columnIndex] ?? "" });
+          }
+        });
+      });
+
+      const patterns = searchText.split(",").map((pattern) => pattern.trim());
+      if (patterns.some((pattern) => pattern === "")) {
+        setMatchedCells(new Set());
+        setPatternError(INVALID_NANKURO_PATTERN_MESSAGE);
+        return;
+      }
+      const matchedCandidates = matchNankuroPatterns(patterns, candidateCells.map(({ value }) => value));
+      if (!matchedCandidates) {
+        setMatchedCells(new Set());
+        setPatternError(INVALID_NANKURO_PATTERN_MESSAGE);
+        return;
+      }
+      const matchedByRow = new Map<number, number[]>();
+      [...matchedCandidates].sort((a, b) => a - b).forEach((candidateIndex) => {
+        const { rowIdx, columnIndex } = candidateCells[candidateIndex];
+        const columns = matchedByRow.get(rowIdx) ?? [];
+        columns.push(columnIndex);
+        matchedByRow.set(rowIdx, columns);
+      });
+
+      const matched = new Set<string>();
+      let matchedRowCount = 0;
+      let exceeded = false;
+      for (const [rowIdx, columns] of matchedByRow) {
+        columns.forEach((columnIndex) => matched.add(`${rowIdx}-${columnIndex}`));
+        matchedRowCount++;
+        if (matchedRowCount > MAX_SEARCH_RESULTS) {
+          exceeded = true;
+          break;
+        }
+      }
+      setResultExceeded(exceeded);
+      setMatchedCells(matched);
+      return;
+    }
 
     const matched = new Set<string>();
     let matchedRowCount = 0;
@@ -152,8 +202,6 @@ export default function DictionaryPage() {
           hit = cell.includes(searchText);
         } else if (searchType === "anagram") {
           hit = matchAnagram(searchText, cell);
-        } else if (searchType === "nankuro") {
-          hit = matchNankuro(searchText, cell);
         } else {
           try {
             const re = new RegExp(searchText);
@@ -316,7 +364,7 @@ export default function DictionaryPage() {
               <span className="font-semibold">アナグラム</span>：文字の並び替えで一致する行を検索します。<code className="bg-white px-1 rounded border">.</code>は任意の1文字、<code className="bg-white px-1 rounded border">[あいう]</code>はいずれか1文字にマッチします。文字クラスの後ろに<code className="bg-white px-1 rounded border">{"{3}"}</code>、<code className="bg-white px-1 rounded border">{"{2,4}"}</code>、<code className="bg-white px-1 rounded border">{"{,4}"}</code>、<code className="bg-white px-1 rounded border">{"{2,}"}</code>を付けて文字数を指定できます。数量指定では同じ文字を重複して選びません。
             </li>
             <li>
-              <span className="font-semibold">文字パターン（ナンクロ形式）</span>：完全一致で検索します。<code className="bg-white px-1 rounded border">.</code>は任意の1文字、<code className="bg-white px-1 rounded border">*</code>は0文字以上の任意の文字列、<code className="bg-white px-1 rounded border">1</code>から<code className="bg-white px-1 rounded border">9</code>は任意の1文字で、同じ数字は同じ文字に一致します。<code className="bg-white px-1 rounded border">[あいう]</code>は括弧内のどれか1文字に一致します。数字そのものは検索できません。
+              <span className="font-semibold">文字パターン（ナンクロ形式）</span>：完全一致で検索します。<code className="bg-white px-1 rounded border">.</code>は任意の1文字、<code className="bg-white px-1 rounded border">*</code>は0文字以上の任意の文字列、<code className="bg-white px-1 rounded border">1</code>から<code className="bg-white px-1 rounded border">9</code>は任意の1文字で、同じ数字は同じ文字に一致します。<code className="bg-white px-1 rounded border">[あいう]</code>は括弧内のどれか1文字に一致します。最初の数字に<code className="bg-white px-1 rounded border">+</code>を付けると、その数字は1文字以上の文字列に一致し、以後の数字も<code className="bg-white px-1 rounded border">+</code>を省略して1文字以上にできます（<code className="bg-white px-1 rounded border">1+1+</code>と<code className="bg-white px-1 rounded border">1+1</code>は同じ意味）。このルールはカンマ区切りの複数パターン全体に適用されます。最初に<code className="bg-white px-1 rounded border">+</code>のない<code className="bg-white px-1 rounded border">11+</code>はエラーです。カンマ区切りで複数パターン（例：<code className="bg-white px-1 rounded border">12ド,12ダー</code>）を指定すると、別々の単語に対して数字の対応を共有し、条件に合う単語を表示します。数字そのものは検索できません。
             </li>
             <li>カラム見出しをクリックすると、そのカラムだけを検索対象に絞れます（複数選択可）。</li>
             <li>カラム見出し右側のボタンで、左は現在表示中データの並び替え、右は現在表示中のその列の値をコピーできます。</li>
@@ -335,7 +383,7 @@ export default function DictionaryPage() {
               name="searchType"
               value="partial"
               checked={searchType === "partial"}
-              onChange={() => setSearchType("partial")}
+              onChange={() => { setSearchType("partial"); setPatternError(null); }}
             />
             部分一致
           </label>
@@ -345,7 +393,7 @@ export default function DictionaryPage() {
               name="searchType"
               value="regex"
               checked={searchType === "regex"}
-              onChange={() => setSearchType("regex")}
+              onChange={() => { setSearchType("regex"); setPatternError(null); }}
             />
             正規表現
           </label>
@@ -355,7 +403,7 @@ export default function DictionaryPage() {
               name="searchType"
               value="anagram"
               checked={searchType === "anagram"}
-              onChange={() => setSearchType("anagram")}
+              onChange={() => { setSearchType("anagram"); setPatternError(null); }}
             />
             アナグラム
           </label>
@@ -365,7 +413,7 @@ export default function DictionaryPage() {
               name="searchType"
               value="nankuro"
               checked={searchType === "nankuro"}
-              onChange={() => setSearchType("nankuro")}
+              onChange={() => { setSearchType("nankuro"); setPatternError(null); }}
             />
             文字パターン
           </label>
@@ -376,7 +424,7 @@ export default function DictionaryPage() {
           <input
             type="text"
             value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
+            onChange={(e) => { setSearchText(e.target.value); setPatternError(null); }}
             onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
             placeholder="検索単語を入力"
             className="border rounded px-3 py-1.5 w-52 focus:outline-none focus:ring-2 focus:ring-blue-400"
@@ -388,7 +436,7 @@ export default function DictionaryPage() {
             検索
           </button>
           <button
-            onClick={() => { setSearchText(""); setMatchedCells(new Set()); setHasSearched(false); setResultExceeded(false); }}
+            onClick={() => { setSearchText(""); setMatchedCells(new Set()); setHasSearched(false); setResultExceeded(false); setPatternError(null); }}
             className="bg-red-100 hover:bg-red-200 text-red-700 px-4 py-2 rounded text-sm transition-colors"
           >
             リセット
@@ -431,6 +479,11 @@ export default function DictionaryPage() {
       {loadError && (
         <div className="mb-4 px-4 py-2 bg-red-100 text-red-700 border border-red-300 rounded whitespace-pre-wrap break-words">
           {loadError}
+        </div>
+      )}
+      {patternError && (
+        <div role="alert" className="mb-4 px-4 py-2 bg-red-100 text-red-700 border border-red-300 rounded">
+          {patternError}
         </div>
       )}
 

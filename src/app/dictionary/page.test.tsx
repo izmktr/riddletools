@@ -70,6 +70,53 @@ test("keeps the query when loading a local CSV", async () => {
   expect(screen.queryByRole("cell", { name: "peach" })).not.toBeInTheDocument();
 });
 
+test("finds separate words using shared digit assignments across patterns", async () => {
+  global.fetch = jest.fn().mockImplementation(async (url: string) => ({
+    ok: true,
+    text: async () => url.endsWith("/index.csv")
+      ? "First,first.csv"
+      : "Word\nあいド\nあいダー\nあうド\nういダー",
+  }));
+  render(<DictionaryPage />);
+  await screen.findByRole("option", { name: "First" });
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "first.csv" } });
+  await screen.findByRole("cell", { name: "あいド" });
+
+  fireEvent.click(screen.getByRole("radio", { name: "文字パターン" }));
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "12ド,12ダー" } });
+  fireEvent.click(screen.getByRole("button", { name: "検索" }));
+
+  expect(screen.getByRole("cell", { name: "あいド" })).toBeInTheDocument();
+  expect(screen.getByRole("cell", { name: "あいダー" })).toBeInTheDocument();
+  expect(screen.queryByRole("cell", { name: "あうド" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("cell", { name: "ういダー" })).not.toBeInTheDocument();
+
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "12ド,12ダー," } });
+  fireEvent.click(screen.getByRole("button", { name: "検索" }));
+  expect(screen.queryByRole("cell", { name: "あいド" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("cell", { name: "あいダー" })).not.toBeInTheDocument();
+});
+
+test("shows an error when a variable-length pattern omits + on its first digit", async () => {
+  global.fetch = jest.fn().mockImplementation(async (url: string) => ({
+    ok: true,
+    text: async () => url.endsWith("/index.csv")
+      ? "First,first.csv"
+      : "Word\nざわざわ\nしんしん",
+  }));
+  render(<DictionaryPage />);
+  await screen.findByRole("option", { name: "First" });
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "first.csv" } });
+  await screen.findByRole("cell", { name: "ざわざわ" });
+
+  fireEvent.click(screen.getByRole("radio", { name: "文字パターン" }));
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "11+" } });
+  fireEvent.click(screen.getByRole("button", { name: "検索" }));
+
+  expect(screen.getByRole("alert")).toHaveTextContent("「11+」は使えません");
+  expect(screen.queryByRole("cell", { name: "ざわざわ" })).not.toBeInTheDocument();
+});
+
 test.each([51, 500, 501])("shows 50 rows before searching and up to 500 of %i matches", async (count) => {
   const data = Array.from({ length: count }, (_, i) => `match-${i + 1}`).join("\n");
   global.fetch = jest.fn().mockImplementation(async (url: string) => ({
